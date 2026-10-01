@@ -104,9 +104,19 @@ la imagen sí incorpora el manifiesto completo de capacidades del router.
 Linux, U-Boot y firmware se fijan por commits completos antes de compilar.
 La base OCI y las acciones se fijan por digest/commit; debootstrap 1.0.141 y
 el keyring Debian 2025.1 se verifican por SHA-256. El proveedor KY publica solo
-MD5 de su toolchain: se comprueba el valor versionado por Orange Pi y se registra
-además SHA-256 antes del build. Ese origen histórico utiliza HTTP; no se desactiva
+MD5 de su toolchain: se comprueba el valor versionado por Orange Pi y el SHA-256
+completo fijado en `prepare.py` tras verificar el archivo real. Ese origen histórico
+utiliza HTTP; no se desactiva
 TLS para las otras fuentes.
+
+El SDK contiene `sysroot/lib/gcc -> /home/ci/gcc_linux_install/lib/gcc`, un enlace
+al prefijo del entorno de empaquetado original. `toolchain.py` verifica SHA-256,
+valida todas las entradas y lo reubica como `../../lib/gcc` dentro del SDK.
+Los enlaces de sysroot a `/lib`/`usr` se interpretan dentro de su sysroot; nunca
+se enlazan al host. Se rechazan escapes, tipos especiales, ciclos, hardlinks sin
+datos y archivos atravesando enlaces. La extracción se prepara en un directorio
+temporal bajo `toolchains` y se publica solo al completarse; no se sobrescribe
+un compilador existente. Los errores muestran el miembro y su destino.
 
 Se publican `SOURCE_DATE_EPOCH`, identidad del contenedor y versiones de sus
 paquetes. Reconstruir su capa APT puede cambiar dependencias del host y por tanto

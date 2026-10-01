@@ -18,6 +18,7 @@ STATE = ROOT / "_ci/state"
 CACHE = ROOT / "_ci/cache"
 TOOLCHAIN = "ky-toolchain-linux-glibc-x86_64-v1.0.1"
 TOOLCHAIN_MD5 = "15c8eb90a4ba8139a034149e6fd74528"
+TOOLCHAIN_SHA256 = "46f18e0227412c34fde9ae38c680c9db45cc59aa6d8b78d7b308ed187ec78c80"
 TOOLCHAIN_URL = f"http://www.iplaystore.cn/upload/_toolchain/{TOOLCHAIN}.tar.xz"
 SOURCES = {
     "kernel": ("https://github.com/orangepi-xunlong/linux-orangepi.git", "orange-pi-6.6-ky"),
@@ -64,7 +65,7 @@ def freeze(snapshot, kernel_commit, uboot_commit):
             raise ValueError(f"A full lowercase commit hash is required for {name}")
         locked[name] = {"url": url, "branch": branch, "commit": commit}
     manifest = {"builder_commit": git("rev-parse", "HEAD"), "debian_snapshot": snapshot,
-                "sources": locked, "toolchain": {"url": TOOLCHAIN_URL, "md5": TOOLCHAIN_MD5}}
+                 "sources": locked, "toolchain": {"url": TOOLCHAIN_URL, "md5": TOOLCHAIN_MD5, "sha256": TOOLCHAIN_SHA256}}
     content = json.dumps(manifest, indent=2, sort_keys=True) + "\n"
     write_new(STATE / "sources.lock.json", content)
     env = {"R2S_KERNEL_COMMIT": locked["kernel"]["commit"],
@@ -163,7 +164,9 @@ def prepare_toolchain():
             sha256.update(chunk)
     if md5.hexdigest() != TOOLCHAIN_MD5:
         raise ValueError("Toolchain does not match the checksum versioned by Orange Pi")
-    # The vendor only publishes MD5. Also record SHA-256 before compilation.
+    if sha256.hexdigest() != TOOLCHAIN_SHA256:
+        raise ValueError("Toolchain does not match the immutable SHA-256 lock")
+    # Retain the vendor MD5 and the independently verified strong SHA-256.
     write_new(STATE / "toolchain.lock.json", json.dumps({"url": TOOLCHAIN_URL,
               "md5": md5.hexdigest(), "sha256": sha256.hexdigest()}, indent=2) + "\n")
     write_new(STATE / "toolchain.ready", "Toolchain archive verified.\n")

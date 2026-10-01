@@ -23,23 +23,7 @@ dpkg-query -W -f='${Package}\t${Version}\n' > _ci/logs/build-container-packages.
 
 # Archive restored from cache still has to pass the vendor's versioned checksum.
 archive="$root/_ci/cache/toolchain/ky-toolchain-linux-glibc-x86_64-v1.0.1.tar.xz"
-python3 - "$archive" <<'PY'
-import pathlib, posixpath, sys, tarfile
-archive = pathlib.Path(sys.argv[1])
-with tarfile.open(archive, 'r:xz') as source:
-    for entry in source:
-        path = pathlib.PurePosixPath(entry.name)
-        if path.is_absolute() or '..' in path.parts or path.parts[0] != archive.name[:-7]:
-            raise SystemExit('Unsafe toolchain archive member: ' + entry.name)
-        if entry.isdev() or entry.isfifo():
-            raise SystemExit('Unexpected toolchain archive device')
-        if entry.issym() or entry.islnk():
-            base = path.parent if entry.issym() else pathlib.PurePosixPath('.')
-            target = pathlib.PurePosixPath(posixpath.normpath(str(base / entry.linkname)))
-            if target.is_absolute() or '..' in target.parts or target.parts[0] != archive.name[:-7]:
-                raise SystemExit('Toolchain link escapes extraction directory')
-PY
-tar -xJf "$archive" --no-same-owner -C toolchains
+python3 -B ci/r2s/toolchain.py "$archive" --destination toolchains --lock _ci/state/toolchain.lock.json
 touch toolchains/ky-toolchain-linux-glibc-x86_64-v1.0.1/.download-complete
 test -x toolchains/ky-toolchain-linux-glibc-x86_64-v1.0.1/bin/riscv64-unknown-linux-gnu-gcc
 

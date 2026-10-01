@@ -24,25 +24,7 @@ if [[ $R2S_STAGE == kernel || $R2S_STAGE == uboot ]]; then
     python3 -B ci/r2s/pipeline.py import toolchain
     archive=(_ci/cache/toolchain/*.tar.xz)
     [[ ${#archive[@]} == 1 ]]
-    python3 -B - "${archive[0]}" <<'PY'
-import hashlib,json,pathlib,posixpath,sys,tarfile
-archive=pathlib.Path(sys.argv[1]); digest=hashlib.sha256()
-with archive.open('rb') as stream:
-    for chunk in iter(lambda:stream.read(1024*1024),b''): digest.update(chunk)
-assert digest.hexdigest()==json.load(open('_ci/state/context.json'))['toolchain_sha256']
-prefix=archive.name[:-7]
-with tarfile.open(archive,'r:xz') as source:
-    for entry in source:
-        path=pathlib.PurePosixPath(entry.name)
-        if path.is_absolute() or '..' in path.parts or not path.parts or path.parts[0]!=prefix or entry.isdev() or entry.isfifo():
-            raise SystemExit('Unsafe toolchain entry')
-        if entry.issym() or entry.islnk():
-            base=path.parent if entry.issym() else pathlib.PurePosixPath('.')
-            target=pathlib.PurePosixPath(posixpath.normpath(str(base/entry.linkname)))
-            if target.is_absolute() or '..' in target.parts or not target.parts or target.parts[0]!=prefix:
-                raise SystemExit('Unsafe toolchain link')
-PY
-    tar -xJf "${archive[0]}" --no-same-owner -C toolchains
+    python3 -B ci/r2s/toolchain.py "${archive[0]}" --destination toolchains --lock _ci/state/context.json
     touch toolchains/ky-toolchain-linux-glibc-x86_64-v1.0.1/.download-complete
     if [[ $R2S_STAGE == kernel ]]; then ccache --max-size=1792M; else ccache --max-size=256M; fi
     ccache --zero-stats
