@@ -1,0 +1,13 @@
+[Unit]
+Description=Expand the shared R2S Btrfs pool without moving its start sector
+After=local-fs.target
+Before=r2s-network.service
+ConditionPathExists=!/var/lib/r2s/grow.complete
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/r2sctl grow
+TimeoutStartSec=120
+
+[Install]
+WantedBy=multi-user.target

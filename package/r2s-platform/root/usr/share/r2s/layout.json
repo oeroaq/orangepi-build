@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "partition_table": "dos",
+  "sector_size": 512,
+  "boot_start": 61440,
+  "boot_sectors": 1048576,
+  "root_start": 1110016,
+  "subvolumes": {
+    "@root": "/",
+    "@data": "/data",
+    "@log": "/var/log",
+    "@snapshots": "/.snapshots",
+    "@docker": "/var/lib/docker",
+    "@containerd": "/var/lib/containerd"
+  }
+}

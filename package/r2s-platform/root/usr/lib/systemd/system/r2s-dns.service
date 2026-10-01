@@ -1,0 +1,18 @@
+[Unit]
+Description=R2S LAN DHCP, DNS and nftsets
+After=r2s-network.service NetworkManager.service
+Requires=r2s-network.service
+Wants=r2s-doh.service
+
+[Service]
+ExecStart=/usr/sbin/dnsmasq --keep-in-foreground --conf-file=/run/r2s/dnsmasq.conf
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=yes
+ProtectHome=yes
+ProtectSystem=strict
+ReadWritePaths=/var/lib/misc /run/r2s
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK AF_PACKET
+
+[Install]
+WantedBy=multi-user.target

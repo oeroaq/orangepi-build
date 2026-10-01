@@ -1,0 +1,46 @@
+#!/usr/bin/env python3
+"""Validate the actual image's mount/configuration contract, not just templates."""
+import json
+from pathlib import Path
+import subprocess
+import sys
+
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "package/r2s-platform/root/usr/lib/r2s"))
+import model
+
+
+def verify(root, top, boot_uuid, root_uuid):
+    layout = json.loads((root / "usr/share/r2s/layout.json").read_text())
+    model.router(json.loads((root / "etc/r2s/router.json").read_text()))
+    model.policies(json.loads((root / "etc/r2s/policies.json").read_text()))
+    model.sqm(json.loads((root / "etc/r2s/sqm.json").read_text()))
+    entries = [line.split() for line in (root / "etc/fstab").read_text().splitlines() if line and not line.startswith("#")]
+    for volume, mount in layout["subvolumes"].items():
+        entry = [row for row in entries if row[1] == mount]
+        if len(entry) != 1 or entry[0][0] != "UUID=" + root_uuid or entry[0][2] != "btrfs":
+            raise ValueError("Incorrect Btrfs mount entry: " + mount)
+        options = entry[0][3].split(",")
+        if "subvol=" + volume not in options or "compress=zstd:3" not in options or "noatime" not in options:
+            raise ValueError("Missing persistent Btrfs mount options: " + mount)
+        if not (top / volume).is_dir():
+            raise ValueError("Missing subvolume: " + volume)
+    boot = [row for row in entries if row[1] == "/boot"]
+    if len(boot) != 1 or boot[0][0] != "UUID=" + boot_uuid or boot[0][2] != "ext4":
+        raise ValueError("Incorrect boot mount")
+    env = (root / "boot/orangepiEnv.txt").read_text()
+    if "rootdev=UUID=" + root_uuid not in env or "rootflags=subvol=@root" not in env:
+        raise ValueError("Boot environment does not match the Btrfs root")
+    if (root / "etc/docker/daemon.json").exists():
+        raise ValueError("Router profile must keep the Docker daemon's defaults")
+    units = (root / "usr/lib/systemd/system").glob("r2s-*.service")
+    for unit in units:
+        name = unit.name
+        if not (root / "etc/systemd/system/multi-user.target.wants" / name).is_symlink() and name not in ("r2s-blocklist.service", "r2s-refresh.service"):
+            raise ValueError("Required R2S unit is not enabled: " + name)
+
+
+if __name__ == "__main__":
+    root, top = map(Path, sys.argv[1:3])
+    uuids = [subprocess.check_output(["blkid", "-s", "UUID", "-o", "value", part], text=True).strip() for part in sys.argv[3:5]]
+    verify(root, top, *uuids)

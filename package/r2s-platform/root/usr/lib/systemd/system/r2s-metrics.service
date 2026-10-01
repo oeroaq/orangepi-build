@@ -1,0 +1,13 @@
+[Unit]
+Description=Bounded R2S collectd/RRD history
+After=local-fs.target r2s-network.service
+RequiresMountsFor=/data
+
+[Service]
+ExecStartPre=/usr/sbin/r2sctl prepare-metrics
+ExecStart=/usr/sbin/collectd -f -C /etc/r2s/collectd.conf
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target

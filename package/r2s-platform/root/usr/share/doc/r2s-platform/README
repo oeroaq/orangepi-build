@@ -1,0 +1,26 @@
+R2S native Debian router
+=======================
+
+WAN: physical ethernet@cac80000, DHCP. LAN: br-lan, 10.0.0.1/24.
+DHCP: 10.0.0.100-199. DNS: dnsmasq -> local dnscrypt-proxy -> DoH.
+
+Before first boot, put a plain SSH public key in:
+  /boot/r2s-firstboot/authorized_keys
+The admin account has sudo; no factory SSH password or root SSH login.
+Host private keys are generated on the device, never shipped in the image.
+
+Configuration: /etc/r2s/router.json, policies.json, sqm.json, allowlist.txt.
+Commands: sudo r2sctl status|check|network|refresh|sqm|update-blocklist|snapshot.
+DNS filtering and statistics persist under /data. All Btrfs subvolumes share
+space; Docker/containerd keep /var/lib/docker and /var/lib/containerd defaults.
+
+Snapshots are manual and paired with a /boot archive under /data/.boot-snapshots.
+Restore the matching root and boot files from removable recovery media.
+Writing a raw firmware image over the Btrfs pool does not preserve its data.
+
+install-to-emmc requires an explicit destination, verified image SHA-256,
+--reuse-boot0/--update-boot0 and --fresh-data/--preserve-data. Preserve mode
+requires the compatible Debian layout, not the historical OpenWrt GPT.
+Verified boot backups and install logs remain in /data/.install.
+
+The build repository's ci/r2s/README.md documents examples and validation scope.

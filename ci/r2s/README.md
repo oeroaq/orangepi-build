@@ -1,0 +1,274 @@
+# Debian 13 Router para Orange Pi R2S
+
+## Perfil
+
+El workflow **Build R2S Debian 13 Router** genera una imagen `.img.gz` para
+`riscv64` en un runner x86-64 de GitHub, dentro de un contenedor Ubuntu 22.04.
+No utiliza `10.0.0.3`. El checkout se monta en `/openwrt`; temporales, fuentes,
+cachés, logs y artefactos del build quedan bajo ese bind mount. El contenedor
+es efímero y necesita privilegios para `chroot`, Btrfs, namespaces y loop devices.
+
+Configuración inicial:
+
+| Función | Valor |
+|---|---|
+| WAN | Controlador físico `ethernet@cac80000`, correspondiente al `eth0` original |
+| Acceso WAN | DHCP IPv4; IPv6 automático en WAN |
+| LAN | Puente `br-lan` con los demás puertos Ethernet físicos |
+| Dirección LAN | `10.0.0.1/24` |
+| DHCP | `10.0.0.100–199`, concesiones de 12 horas |
+| DNS y gateway | `10.0.0.1`; nombres internos bajo `home.arpa` |
+| Administración | SSH/consola, usuario `admin`, sudo sin contraseña |
+| Autenticación SSH | Clave pública; acceso root y contraseñas por SSH deshabilitados |
+| DNS | dnsmasq LAN/localhost → dnscrypt-proxy `127.0.0.1:5053` → DoH |
+| Upstreams | Cloudflare y Quad9, IPs fijas y hostname TLS autenticado |
+| Filtrado | HaGeZi Light y allowlist local; actualización diaria transaccional |
+| Docker | Paquetes Debian; driver, rutas y opciones del daemon predeterminados |
+
+NetworkManager mantiene perfiles explícitos; no crea conexiones Ethernet
+automáticas que compitan con el puente. La WAN se reconoce por device tree,
+no por el orden de enumeración PCIe. Se puede indicar `wan_override` en
+`/etc/r2s/router.json` tras verificar el hardware. Si no hay una correspondencia
+válida, no se configura un puerto WAN arbitrariamente.
+
+IPv6 LAN admite un **prefijo /64 explícitamente enrutado** mediante
+`ipv6_lan_prefix`. Sin ese dato se conserva link-local en LAN y no se anuncian
+prefijos globales inventados. La delegación dinámica de prefijos del ISP deberá
+configurarse según la conexión; no se presupone que un prefijo WAN sea delegable.
+
+## Ejecutar GitHub Actions
+
+1. Subir los cambios a `orangepi-build`. El workflow debe existir en la rama por
+   defecto para mostrar **Run workflow**.
+2. Abrir **Actions → Build R2S Debian 13 Router → Run workflow**.
+3. Mantener `use_cache=true`. La primera ejecución descarga el toolchain y
+   prepara las fuentes y el sistema base.
+4. Descargar el artifact `r2s-debian13-<run_id>-<attempt>`.
+
+| Entrada | Valor inicial |
+|---|---|
+| `use_cache` | `true` |
+| `debian_snapshot` | `20260928T000000Z` |
+| `kernel_commit` | vacío: resolver y fijar `orange-pi-6.6-ky` |
+| `uboot_commit` | vacío: resolver y fijar `v2022.10-ky` |
+
+El artifact contiene imagen, paquetes `.deb`, bootfs, U-Boot, configuración
+expandida, locks, manifests, logs y `sha256sums`. Se conserva **14 días**.
+Los diagnósticos se publican también si falla una etapa. No se crean releases
+automáticas.
+
+```bash
+sha256sum -c sha256sums
+gzip -t Orangepir2s_*.img.gz
+```
+
+`raw-image.sha256` nombra el contenido descomprimido como `r2s-debian.img`.
+El nombre del fichero incluye `minimal`, referido a la base headless seleccionada;
+la imagen sí incorpora el manifiesto completo de capacidades del router.
+
+## Reproducibilidad y cachés
+
+Linux, U-Boot y firmware se fijan por commits completos antes de compilar.
+La base OCI y las acciones se fijan por digest/commit; debootstrap 1.0.141 y
+el keyring Debian 2025.1 se verifican por SHA-256. El proveedor KY publica solo
+MD5 de su toolchain: se comprueba el valor versionado por Orange Pi y se registra
+además SHA-256 antes del build. Ese origen histórico utiliza HTTP; no se desactiva
+TLS para las otras fuentes.
+
+Se publican `SOURCE_DATE_EPOCH`, identidad del contenedor y versiones de sus
+paquetes. Reconstruir su capa APT puede cambiar dependencias del host y por tanto
+su identidad. Los locks permiten identificar el build, pero no se declara una
+garantía de reproducción bit a bit sin conservar también ese entorno exacto.
+
+| Caché | Contenido / invalidación |
+|---|---|
+| Toolchain | Archivo verificado, runner y checksum |
+| Git | Objetos bare, commits fijados; fallback para reutilizar objetos |
+| `ccache` | Máximo 2 GiB; compatibilidad contenedor/toolchain, clave nueva por ejecución |
+| Rootfs | Commit del builder, snapshot y entorno; coincidencia exacta, sin fallback |
+| Docker Buildx | Capas del contenedor mediante backend `gha` |
+
+Las etapas completas se guardan aunque falle después el ensamblado. El rootfs
+se comprueba con LZ4, tar y SHA-256; no se cachean árboles con `.o`, paquetes
+generados ni imágenes. GitHub puede expulsar cachés: el arranque en frío sigue
+siendo válido. Cambiar el perfil invalida el rootfs; `ccache` comprueba los objetos
+contra sus entradas reales. El resumen muestra aciertos, tamaños y duración.
+
+## Paquetes y kernel
+
+`packages.list` es el baseline Debian explícito, instalado sin recommends.
+Incluye red, firewall, VPN, DNS, Docker/Compose, almacenamiento, diagnóstico,
+cron/NTP y estadísticas. El paquete fuente `package/r2s-platform` produce un
+`.deb` declarativo con conffiles, unidades systemd e integraciones propias.
+
+El perfil elimina el SDK/cámara/demos de la familia KY, evita instalar
+`orangepi-config`/zsh, paquetes de desarrollo y el `.deb` de headers en `/opt`.
+Las cabeceras compiladas siguen disponibles entre los paquetes del artifact.
+APT no conserva sus `.deb` descargados; la imagen se limpia al terminar.
+
+`kernel.required` aplica y valida el contrato tras `olddefconfig`. Btrfs y ext4
+se integran en el kernel; WireGuard, VXLAN, MACVLAN, bridge, VLAN, bonding, VRF,
+IPsec, PPPoE, nftables y QoS se verifican como módulos del mismo build. Se
+habilitan ingress y `NFT_FIB_INET`; se desactiva DWARF/BTF para limitar disco.
+No se mezclan módulos de otra compilación ni se instala un kernel genérico
+de Debian para sustituir el soporte hardware KY.
+
+El sistema instalado utiliza los repositorios normales de Trixie y seguridad
+para APT; el snapshot es el origen fijado de la construcción, no una congelación
+permanente de las actualizaciones del router.
+
+## Btrfs y eMMC de 8 GB
+
+```text
+Área de arranque vendor
+p1: ext4, /boot, inicio 30 MiB, tamaño 512 MiB
+p2: Btrfs, inicio 542 MiB, resto del dispositivo
+    @root        /
+    @data        /data
+    @log         /var/log
+    @snapshots   /.snapshots
+    @docker      /var/lib/docker
+    @containerd  /var/lib/containerd
+```
+
+Todos comparten espacio libre, sin cuotas iniciales, con `compress=zstd:3,noatime`.
+No se reserva una raíz de 3/8 GiB. La imagen se dimensiona por su contenido y el
+margen del builder; la validación exige que no exceda 7.000.000.000 bytes. Al
+arrancar, `growpart` amplía solo p2, comprueba que no cambie su inicio y expande
+Btrfs al espacio disponible. Se guarda la tabla anterior en `/var/lib/r2s`.
+
+Los drop-ins de Docker/containerd únicamente exigen los mounts habituales y
+esperan una restauración pendiente. No cambian `daemon.json`, `data-root`, driver
+de almacenamiento ni redes del daemon. El firewall convive con iptables-nft y
+`DOCKER-USER`: mantener los defaults de Docker no debe cortar el forwarding LAN.
+Los bridges nuevos se detectan mediante netlink y un timer de mantenimiento.
+
+## Primer acceso
+
+Después de grabar la imagen y antes de arrancar, colocar una **clave pública** en
+la partición ext4 de boot:
+
+```text
+r2s-firstboot/authorized_keys
+```
+
+No incluir claves privadas ni contraseñas. El primer arranque crea las claves
+SSH del host e importa la pública una sola vez para `admin`. Si el archivo no
+está presente, el router arranca pero no proporciona una contraseña SSH de fábrica.
+Si falta la clave, apagar, añadir el archivo al medio de arranque y volver a
+arrancar: no hace falta una contraseña de fábrica. Una vez autenticado, los
+comandos de administración son:
+
+```bash
+sudo r2sctl firstboot
+sudo systemctl restart ssh
+ssh admin@10.0.0.1
+```
+
+Los puertos SSH y DNS del router se admiten desde LAN; las conexiones nuevas
+desde WAN no habilitan administración. DNS 53 de LAN se redirige al resolver
+local y se bloquea su salida directa por 53/853. El control de DoH de aplicaciones
+sobre 443 requiere políticas específicas; no se afirma bloquear todo canal DNS.
+Docker conserva su comportamiento DNS predeterminado.
+
+## Configurar capacidades
+
+```bash
+sudo r2sctl status
+sudo r2sctl check
+sudo r2sctl network          # Reaplicar perfiles explícitos; puede cambiar conectividad
+sudo r2sctl refresh          # Routing, nftsets y firewall
+sudo r2sctl update-blocklist
+sudo r2sctl sqm
+sudo r2sctl snapshot
+```
+
+Conffiles bajo `/etc/r2s`:
+
+- `router.json`: LAN, DHCP, selector WAN, WANs adicionales, prefijo IPv6 y feed DNS.
+- `policies.json`: grupos PBR, origen/dominio, interfaz/gateway y `vpn_only`.
+- `sqm.json`: interfaces y velocidades reales de subida/bajada en kbit/s.
+- `allowlist.txt`: un dominio por línea, resuelto por la salida cifrada.
+- `doh.toml`: endpoints cifrados, configurables y sin exponer el backend a LAN.
+
+Ejemplo de política (la imagen empieza con grupos vacíos):
+
+```json
+{"groups":[{"id":1,"interface":"wg0","sources":["10.0.0.20/32"],"domains":[],"vpn_only":true}]}
+```
+
+Las tablas 30001–30099 y prioridades 10001–10099 están reservadas para R2S.
+Una política exclusiva de VPN instala una ruta unreachable de respaldo y un
+killswitch antes de aceptar conexiones establecidas. Los conjuntos DNS se
+conservan al recargar nuestro firewall; no se hace `flush ruleset`.
+
+Ejemplo de SQM, sustituyendo las velocidades por las de tu conexión:
+
+```json
+{"interfaces":[{"interface":"eth0","upload_kbit":20000,"download_kbit":100000,"enabled":true}]}
+```
+
+CAKE actúa sobre subida e IFB sobre bajada. VPN/SQM no se activan con velocidades
+inventadas o credenciales embebidas. WANs adicionales usan perfiles DHCP con
+métricas y probes TCP; el failover de IPv4 supervisa solo sus rutas DHCP.
+
+Journald se limita a 64 MiB; collectd/RRD conserva series de tamaño fijo bajo
+`/data/metrics`, junto con vnstat. `r2sctl snapshot` crea un snapshot read-only de
+la raíz y un archivo/checksum de `/boot` en `/data/.boot-snapshots`. Para rollback
+se restauran ambos desde un medio de recuperación, manteniendo kernel/módulos
+compatibles. No hay rollback o acumulación automática de snapshots.
+
+## Instalar o actualizar en eMMC
+
+El instalador requiere arranque desde USB/medio extraíble, `/data` montado y un
+destino eMMC explícito sin particiones montadas. No selecciona un disco por defecto.
+Usar el SHA-256 publicado del archivo `.img.gz`:
+
+```bash
+sudo install-to-emmc --device /dev/mmcblk0 \
+  --image /data/Orangepir2s_VERSION.img.gz --sha256 HASH_COMPLETO \
+  --reuse-boot0 --fresh-data
+```
+
+Son obligatorias ambas elecciones:
+
+- `--reuse-boot0` o `--update-boot0`.
+- `--fresh-data` o `--preserve-data`.
+
+`fresh-data` instala la imagen, verifica lo escrito y genera UUIDs únicos para
+no confundir la eMMC con el USB de origen. Borra el layout/datos anteriores; no
+convierte una p6 de OpenWrt automáticamente. `preserve-data` exige este layout
+Debian compatible: prepara una nueva raíz, conserva conffiles, SSH y todos los
+subvolúmenes de datos, verifica backup de bootfs y hace un intercambio atómico
+de las raíces con `renameat2`. Los errores de proceso intentan restaurar raíz,
+bootfs y áreas de arranque; una interrupción de energía requiere recuperación
+desde los backups, no se declara una transacción atómica entre ambos filesystems.
+
+Antes de escribir se verifican backups de cabecera/tabla, cola GPT y boot0 bajo
+`/data/.install/FECHA`. Los binarios de arranque provienen del paquete de la imagen
+verificada. Se conservan los backups y el estado éxito/fallo. Una instalación
+preservada registra paquetes adicionales para restaurarlos por APT antes de
+Docker, excluyendo kernels ajenos, metadatos OpenWrt y Adblock.
+
+## Validación
+
+Checks locales:
+
+```bash
+python3 -B -m unittest discover -s ci/r2s -p 'test_*.py' -v
+for script in ci/r2s/*.sh ci/r2s/config.conf; do bash -n "$script"; done
+actionlint .github/workflows/build-r2s-debian.yml
+```
+
+Actions ejecuta primero pruebas Linux aisladas: Btrfs, intercambio/crecimiento
+con datos persistentes, forwarding/NAT, convivencia con FORWARD DROP de Docker,
+intercepción DNS y killswitch con túnel ausente. Después valida GPT/MBR real,
+filesystems, subvolúmenes/fstab, configuración y unidades, paquetes, ausencia de
+secretos/desarrollo/cachés, ABI, kernel/DTB y hashes de los componentes de arranque.
+Solo publica la imagen cuando pasa la verificación y el gzip corresponde a sus
+bytes raw validados.
+
+Las pruebas locales en macOS no ejecutan mounts/iptables ni una compilación
+RISC-V completa. La primera ejecución de Actions y la validación en R2S siguen
+siendo necesarias: arranque USB, correspondencia de conectores, eMMC/boot0,
+crecimiento, DHCP/DNS, IPv6 según ISP, VPN, QoS y contenedores.

@@ -1,0 +1,10 @@
+[Unit]
+Description=Transactionally update the lightweight DNS domain blocklist
+After=r2s-dns.service r2s-doh.service network-online.target
+Wants=network-online.target
+RequiresMountsFor=/data
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/r2sctl update-blocklist
+TimeoutStartSec=120

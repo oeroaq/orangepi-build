@@ -1,0 +1,9 @@
+[Unit]
+Description=Refresh R2S routing, DNS nftsets and Docker firewall compatibility
+After=r2s-network.service NetworkManager.service
+Requires=r2s-network.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/r2sctl refresh
+ExecStartPost=/usr/sbin/r2sctl sqm

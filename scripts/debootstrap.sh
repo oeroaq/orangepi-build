@@ -193,7 +193,7 @@ create_rootfs_cache()
 			local apt_extra="-o Acquire::http::Proxy=\"http://${APT_PROXY_ADDR:-localhost:3142}\""
 			local apt_mirror="http://${APT_PROXY_ADDR:-localhost:3142}/$APT_MIRROR"
 		else
-			local apt_mirror="http://$APT_MIRROR"
+			local apt_mirror="${APT_MIRROR_URL:-http://$APT_MIRROR}"
 		fi
 
 		# fancy progress bars
@@ -220,7 +220,7 @@ create_rootfs_cache()
 		cd $SDCARD # this will prevent error sh: 0: getcwd() failed
 
 		eval 'debootstrap --variant=minbase --include=${DEBOOTSTRAP_LIST// /,} ${PACKAGE_LIST_EXCLUDE:+ --exclude=${PACKAGE_LIST_EXCLUDE// /,}} \
-			--no-check-gpg --arch=$ARCH --components=${DEBOOTSTRAP_COMPONENTS} $DEBOOTSTRAP_OPTION --foreign ${release_version} $SDCARD/ ${apt_mirror}' \
+			${DEBOOTSTRAP_GPG_OPTION:---no-check-gpg} --arch=$ARCH --components=${DEBOOTSTRAP_COMPONENTS} $DEBOOTSTRAP_OPTION --foreign ${release_version} $SDCARD/ ${apt_mirror}' \
 			${PROGRESS_LOG_TO_FILE:+' | tee -a $DEST/${LOG_SUBPATH}/debootstrap.log'} \
 			${OUTPUT_DIALOG:+' | dialog --backtitle "$backtitle" --progressbox "Debootstrap (stage 1/2)..." $TTY_Y $TTY_X'} \
 			${OUTPUT_VERYSILENT:+' >/dev/null 2>/dev/null'} ';EVALPIPE=(${PIPESTATUS[@]})'
@@ -323,7 +323,7 @@ create_rootfs_cache()
 			${OUTPUT_DIALOG:+' | dialog --backtitle "$backtitle" --progressbox "Installing Orange Pi main packages..." $TTY_Y $TTY_X'} \
 			${OUTPUT_VERYSILENT:+' >/dev/null 2>/dev/null'} ';EVALPIPE=(${PIPESTATUS[@]})'
 
-		[[ ${PIPESTATUS[0]} -ne 0 ]] && exit_with_error "Installation of Orange Pi main packages for ${BRANCH} ${BOARD} ${RELEASE} ${DESKTOP_APPGROUPS_SELECTED} ${DESKTOP_ENVIRONMENT} ${BUILD_MINIMAL} failed"
+		[[ ${EVALPIPE[0]} -ne 0 ]] && exit_with_error "Installation of Orange Pi main packages for ${BRANCH} ${BOARD} ${RELEASE} ${DESKTOP_APPGROUPS_SELECTED} ${DESKTOP_ENVIRONMENT} ${BUILD_MINIMAL} failed"
 
 		if [[ $BUILD_DESKTOP == "yes" ]]; then
 			# FIXME Myy : Are we keeping this only for Desktop users,
@@ -402,6 +402,10 @@ create_rootfs_cache()
 		rm $SDCARD/etc/resolv.conf
 		echo "nameserver $NAMESERVER" >> $SDCARD/etc/resolv.conf
 
+		# stage: sanitize the reusable rootfs before archiving
+		call_extension_method "rootfs_cache_finalize" << 'ROOTFS_CACHE_FINALIZE'
+*Sanitize the base filesystem before saving its reusable archive.*
+ROOTFS_CACHE_FINALIZE
 		# stage: make rootfs cache archive
 		display_alert "Ending debootstrap process and preparing cache" "$RELEASE" "info"
 		sync
@@ -677,8 +681,14 @@ PREPARE_IMAGE_SIZE
 		display_alert "Creating rootfs" "$ROOTFS_TYPE on $rootdevice"
 		mkfs.${mkfs[$ROOTFS_TYPE]} ${mkopts[$ROOTFS_TYPE]} ${mkopts_label[$ROOTFS_TYPE]:+${mkopts_label[$ROOTFS_TYPE]}"$ROOT_FS_LABEL"} $rootdevice >> "${DEST}"/${LOG_SUBPATH}/install.log 2>&1
 		[[ $ROOTFS_TYPE == ext4 ]] && tune2fs -o journal_data_writeback $rootdevice > /dev/null
+		call_extension_method "pre_mount_rootfs" << 'PRE_MOUNT_ROOTFS'
+*Create root subvolumes before mounting the formatted root filesystem.*
+PRE_MOUNT_ROOTFS
 		if [[ $ROOTFS_TYPE == btrfs && $BTRFS_COMPRESSION != none ]]; then
 			local fscreateopt="-o compress-force=${BTRFS_COMPRESSION}"
+		fi
+		if [[ $ROOTFS_TYPE == btrfs && -n $BTRFS_ROOT_SUBVOL ]]; then
+			local fscreateopt="-o subvol=${BTRFS_ROOT_SUBVOL},compress=${BTRFS_COMPRESSION},noatime"
 		fi
 		mount ${fscreateopt} $rootdevice $MOUNT/
 		# create fstab (and crypttab) entry
@@ -689,7 +699,9 @@ PREPARE_IMAGE_SIZE
 		else
 			local rootfs="UUID=$(blkid -s UUID -o value $rootdevice)"
 		fi
-		echo "$rootfs / ${mkfs[$ROOTFS_TYPE]} defaults,noatime${mountopts[$ROOTFS_TYPE]} 0 1" >> $SDCARD/etc/fstab
+		local fsckpass=1
+		[[ $ROOTFS_TYPE == btrfs ]] && fsckpass=0
+		echo "$rootfs / ${mkfs[$ROOTFS_TYPE]} defaults,noatime${mountopts[$ROOTFS_TYPE]} 0 $fsckpass" >> $SDCARD/etc/fstab
 	else
 		# update_initramfs will fail if /lib/modules/ doesn't exist
 		mount --bind --make-private $SDCARD $MOUNT/

@@ -1,0 +1,14 @@
+[Unit]
+Description=R2S persistent network traffic statistics
+After=r2s-metrics.service
+Requires=r2s-metrics.service
+RequiresMountsFor=/data
+
+[Service]
+User=vnstat
+ExecStart=/usr/sbin/vnstatd --nodaemon --config /etc/r2s/vnstat.conf
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target

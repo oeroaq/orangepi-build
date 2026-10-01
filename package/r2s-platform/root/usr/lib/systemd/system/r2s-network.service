@@ -1,0 +1,14 @@
+[Unit]
+Description=Configure R2S WAN/LAN and router firewall
+After=local-fs.target systemd-udev-settle.service systemd-sysctl.service r2s-grow.service
+Wants=systemd-udev-settle.service
+Before=NetworkManager.service network-pre.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/r2sctl network
+RemainAfterExit=yes
+TimeoutStartSec=90
+
+[Install]
+WantedBy=multi-user.target

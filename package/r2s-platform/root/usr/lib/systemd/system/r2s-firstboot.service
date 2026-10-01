@@ -1,0 +1,13 @@
+[Unit]
+Description=Generate host identity and import the administrator public key
+After=local-fs.target
+Before=ssh.service
+RequiresMountsFor=/boot
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/r2sctl firstboot
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

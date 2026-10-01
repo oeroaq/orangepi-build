@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily DNS blocklist maintenance
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=1day
+RandomizedDelaySec=5min
+Unit=r2s-blocklist.service
+
+[Install]
+WantedBy=timers.target

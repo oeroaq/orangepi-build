@@ -1,0 +1,25 @@
+[Unit]
+Description=R2S native Debian encrypted DNS upstream
+After=r2s-network.service NetworkManager.service chrony.service
+Requires=r2s-network.service
+Wants=chrony.service
+
+[Service]
+User=r2s-doh
+Group=r2s-doh
+RuntimeDirectory=r2s-doh
+WorkingDirectory=/run/r2s-doh
+ExecStartPre=-/usr/bin/chronyc waitsync 30 1 0 2
+ExecStart=/usr/sbin/dnscrypt-proxy -config /etc/r2s/doh.toml
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=90
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+[Install]
+WantedBy=multi-user.target

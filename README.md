@@ -21,3 +21,12 @@ Soc | Boards |
 
 ## Supported Host Systems
 - Ubuntu 22.04
+
+## Orange Pi R2S Debian 13 image
+
+The **Build R2S Debian 13 Router** GitHub Actions workflow builds a headless
+router image on GitHub-hosted x86-64 runners, with toolchain, Git, compiler,
+rootfs and container caches. It includes WAN DHCP, LAN `10.0.0.1/24`, native
+Debian DNS/VPN/firewall tools and a shared Btrfs layout for 8 GB eMMC.
+See [the R2S CI documentation](ci/r2s/README.md) for provisioning, pinned sources,
+downloadable artifacts, storage, native services and validation scope.

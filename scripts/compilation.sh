@@ -484,6 +484,10 @@ CUSTOM_KERNEL_CONFIG
 		fi
 	fi
 
+	# Verify the expanded configuration before generating any kernel artifacts.
+	call_extension_method "post_kernel_config" << 'POST_KERNEL_CONFIG'
+*Verify the expanded kernel configuration before compiling or packaging.*
+POST_KERNEL_CONFIG
 	# create linux-source package - with already patched sources
 	# We will build this package first and clear the memory.
 	if [[ $BUILD_KSRC != no ]]; then

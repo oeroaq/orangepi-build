@@ -152,7 +152,11 @@ install_common()
 	chroot "${SDCARD}" /bin/bash -c "dpkg-reconfigure -f noninteractive tzdata >/dev/null 2>&1"
 
 	# set root password
-	chroot "${SDCARD}" /bin/bash -c "(echo $ROOTPWD;echo $ROOTPWD;) | passwd root >/dev/null 2>&1"
+	if [[ $LOCK_INITIAL_PASSWORDS == yes ]]; then
+		chroot "${SDCARD}" passwd -l root
+	else
+		chroot "${SDCARD}" /bin/bash -c "(echo $ROOTPWD;echo $ROOTPWD;) | passwd root >/dev/null 2>&1"
+	fi
 
 	# enable automated login to console(s)
 	#mkdir -p "${SDCARD}"/etc/systemd/system/getty@.service.d/
@@ -334,7 +338,7 @@ PRE_INSTALL_KERNEL_DEBS
 			fi
 			if [[ $INSTALL_HEADERS == yes ]]; then
 				install_deb_chroot "${DEB_STORAGE}/${CHOSEN_KERNEL/image/headers}_${REVISION}_${ARCH}.deb"
-			else
+			elif [[ $COPY_HEADERS != no ]]; then
 				cp "${DEB_STORAGE}/${CHOSEN_KERNEL/image/headers}_${REVISION}_${ARCH}.deb" "${SDCARD}"/opt/
 			fi
 		else
@@ -449,7 +453,11 @@ POST_INSTALL_KERNEL_DEBS
 
 	# add orangepi user
 	chroot "${SDCARD}" /bin/bash -c "adduser --quiet --disabled-password --shell /bin/bash --home /home/${OPI_USERNAME} --gecos ${OPI_USERNAME} ${OPI_USERNAME}"
-	chroot "${SDCARD}" /bin/bash -c "(echo ${OPI_PWD};echo ${OPI_PWD};) | passwd "${OPI_USERNAME}" >/dev/null 2>&1"
+	if [[ $LOCK_INITIAL_PASSWORDS == yes ]]; then
+		chroot "${SDCARD}" passwd -l "${OPI_USERNAME}"
+	else
+		chroot "${SDCARD}" /bin/bash -c "(echo ${OPI_PWD};echo ${OPI_PWD};) | passwd "${OPI_USERNAME}" >/dev/null 2>&1"
+	fi
 	for additionalgroup in sudo netdev audio video disk tty users games dialout plugdev input bluetooth systemd-journal ssh docker; do
 	        chroot "${SDCARD}" /bin/bash -c "usermod -aG ${additionalgroup} ${OPI_USERNAME} 2>/dev/null"
 	done

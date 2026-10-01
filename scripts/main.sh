@@ -46,7 +46,7 @@ fi
 
 [[ $DOWNLOAD_MIRROR == "china" ]] && NTP_SERVER="cn.pool.ntp.org"
 
-if [[ $BUILD_ALL != "yes" ]]; then
+if [[ $BUILD_ALL != "yes" && ${CI:-false} != true ]]; then
 	# override stty size
 	[[ -n $COLUMNS ]] && stty cols $COLUMNS
 	[[ -n $LINES ]] && stty rows $LINES
@@ -608,13 +608,13 @@ fi
 if [[ $BUILD_OPT == rootfs || $BUILD_OPT == image ]]; then
 
 	# Compile orangepi-config if packed .deb does not exist or use the one from Orange Pi
-	if [[ ! -f ${DEB_STORAGE}/orangepi-config_${REVISION}_all.deb ]]; then
+	if [[ $BUILD_MINIMAL != yes && ! -f ${DEB_STORAGE}/orangepi-config_${REVISION}_all.deb ]]; then
 	
 		[[ "${REPOSITORY_INSTALL}" != *orangepi-config* ]] && compile_orangepi-config
 	fi 
 
 	# Compile orangepi-zsh if packed .deb does not exist or use the one from repository
-	if [[ ! -f ${DEB_STORAGE}/orangepi-zsh_${REVISION}_all.deb ]]; then
+	if [[ $BUILD_MINIMAL != yes && ! -f ${DEB_STORAGE}/orangepi-zsh_${REVISION}_all.deb ]]; then
 
 	        [[ "${REPOSITORY_INSTALL}" != *orangepi-zsh* ]] && compile_orangepi-zsh
 	fi

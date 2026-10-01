@@ -1,0 +1,16 @@
+[Unit]
+Description=Restore additional Debian packages after a preserved eMMC installation
+After=NetworkManager.service r2s-dns.service r2s-doh.service network-online.target
+Wants=network-online.target r2s-doh.service
+RequiresMountsFor=/data
+ConditionPathExists=/data/.upgrade/pending
+Before=docker.service containerd.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/r2sctl restore
+RemainAfterExit=yes
+TimeoutStartSec=20min
+
+[Install]
+WantedBy=multi-user.target

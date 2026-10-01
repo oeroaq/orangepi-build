@@ -1,0 +1,13 @@
+{
+  "wan_dt_address": "cac80000",
+  "lan_bridge": "br-lan",
+  "lan_address": "10.0.0.1/24",
+  "dhcp_start": "10.0.0.100",
+  "dhcp_end": "10.0.0.199",
+  "lease_time": "12h",
+  "domain": "home.arpa",
+  "ipv6_lan_prefix": null,
+  "blocklist_url": "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/domains/light.txt",
+  "wan_override": null,
+  "additional_wan": []
+}

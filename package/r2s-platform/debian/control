@@ -1,0 +1,8 @@
+Package: r2s-platform
+Version: @VERSION@
+Architecture: all
+Maintainer: R2S build automation <r2s@example.invalid>
+Depends: python3, network-manager, iproute2, nftables, iptables, dnsmasq, dnscrypt-proxy, openssh-server, sudo, btrfs-progs, cloud-guest-utils, collectd-core, rrdtool, vnstat, chrony, curl, jq, zstd, rsync, mmc-utils
+Description: Native Debian routing and shared Btrfs integration for Orange Pi R2S
+ WAN DHCP, bridged LAN, encrypted DNS, nftsets, VPN routing policies,
+ QoS, first-boot provisioning and a shared persistent Btrfs layout.

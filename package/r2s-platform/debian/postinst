@@ -1,0 +1,19 @@
+#!/bin/sh
+set -eu
+if [ "${1:-}" = configure ]; then
+    if ! getent passwd r2s-doh >/dev/null; then
+        adduser --system --group --no-create-home --home /nonexistent r2s-doh
+    fi
+    if ! getent passwd admin >/dev/null; then
+        adduser --disabled-password --gecos '' admin
+    fi
+    usermod -aG sudo admin
+    install -d -m 0755 /var/lib/r2s /var/lib/misc /boot/r2s-firstboot
+    if [ -d /run/systemd/system ]; then
+        systemctl daemon-reload
+    fi
+    for unit in r2s-grow r2s-network r2s-doh r2s-dns r2s-firstboot r2s-metrics r2s-vnstat r2s-restore r2s-links; do
+        systemctl enable "$unit.service"
+    done
+    systemctl enable r2s-blocklist.timer r2s-refresh.timer
+fi

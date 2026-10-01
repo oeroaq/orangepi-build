@@ -1,0 +1,10 @@
+[Unit]
+Description=Track Docker bridges and WAN/VPN changes
+
+[Timer]
+OnBootSec=60
+OnUnitActiveSec=60
+Unit=r2s-refresh.service
+
+[Install]
+WantedBy=timers.target

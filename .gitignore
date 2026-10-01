@@ -23,6 +23,7 @@ output
 u-boot
 toolchains
 userpatches
+_ci/
 
 mkimage.sh
 

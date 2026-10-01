@@ -1575,6 +1575,11 @@ prepare_host()
 			# download external Linaro compiler and missing special dependencies since they are needed for certain sources
 
 		case ${BOARDFAMILY} in
+			ky)
+			local toolchains=(
+				"ky-toolchain-linux-glibc-x86_64-v1.0.1.tar.xz"
+				)
+			;;
 			cix)
 			local toolchains=(
 				"arm-gnu-toolchain-12.3.rel1-x86_64-aarch64-none-linux-gnu.tar.xz"
@@ -1634,6 +1639,7 @@ prepare_host()
 		if [[ "$(arch)" != "aarch64" ]]; then
 			test -e /proc/sys/fs/binfmt_misc/qemu-arm || update-binfmts --enable qemu-arm
 			test -e /proc/sys/fs/binfmt_misc/qemu-aarch64 || update-binfmts --enable qemu-aarch64
+			test -e /proc/sys/fs/binfmt_misc/qemu-riscv64 || update-binfmts --enable qemu-riscv64
 		fi
 	fi
 

@@ -1,0 +1,5 @@
+#!/bin/sh
+set -eu
+ip monitor link | while IFS= read -r event; do
+    [ -z "$event" ] || systemctl --no-block start r2s-refresh.service
+done
