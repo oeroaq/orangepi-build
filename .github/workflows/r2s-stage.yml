@@ -1,0 +1,200 @@
+name: R2S sealed build stage
+
+on:
+  workflow_call:
+    inputs:
+      stage:
+        required: true
+        type: string
+      namespace:
+        required: true
+        type: string
+      use_cache:
+        required: true
+        type: boolean
+      compat:
+        required: true
+        type: string
+      rootfs_key:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  stage:
+    name: ${{ inputs.stage }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 350
+    env:
+      CI: 'true'
+      PYTHONDONTWRITEBYTECODE: '1'
+      SEGMENT_DOWNLOAD_TIMEOUT_MINS: '10'
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Download immutable build context
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ${{ inputs.namespace }}-context
+          path: _ci/artifacts
+
+      - name: Validate context
+        env:
+          BUILD_ID: ${{ inputs.namespace }}
+        run: python3 -B ci/r2s/pipeline.py import context --build-id "$BUILD_ID"
+
+      - name: Download exact prepared builder
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ${{ inputs.namespace }}-environment
+          path: _ci/artifacts
+
+      - name: Load and verify prepared OCI image
+        run: bash ci/r2s/load-environment.sh
+
+      - name: Download compiler toolchain
+        if: inputs.stage == 'kernel' || inputs.stage == 'uboot'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ${{ inputs.namespace }}-toolchain
+          path: _ci/artifacts
+
+      - name: Download pinned component source
+        if: inputs.stage == 'kernel' || inputs.stage == 'uboot' || inputs.stage == 'rootfs'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ${{ inputs.namespace }}-source-${{ inputs.stage == 'rootfs' && 'firmware' || inputs.stage }}
+          path: _ci/artifacts
+
+      - name: Download kernel result
+        if: inputs.stage == 'assemble' || inputs.stage == 'verify'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ${{ inputs.namespace }}-kernel
+          path: _ci/artifacts
+
+      - name: Download U-Boot result
+        if: inputs.stage == 'assemble' || inputs.stage == 'verify'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ${{ inputs.namespace }}-uboot
+          path: _ci/artifacts
+
+      - name: Download Debian rootfs result
+        if: inputs.stage == 'assemble' || inputs.stage == 'verify'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ${{ inputs.namespace }}-rootfs
+          path: _ci/artifacts
+
+      - name: Download assembled image
+        if: inputs.stage == 'verify'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ${{ inputs.namespace }}-image
+          path: _ci/artifacts
+
+      - name: Restore independent compiler cache
+        id: ccache
+        if: inputs.use_cache && (inputs.stage == 'kernel' || inputs.stage == 'uboot')
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: external/cache/ccache
+          key: r2s-ccache-v2-${{ inputs.stage }}-${{ runner.os }}-${{ runner.arch }}-${{ inputs.compat }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            r2s-ccache-v2-${{ inputs.stage }}-${{ runner.os }}-${{ runner.arch }}-${{ inputs.compat }}-
+
+      - name: Restore exact base rootfs
+        id: rootfs
+        if: inputs.use_cache && inputs.stage == 'rootfs'
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: external/cache/rootfs
+          key: r2s-rootfs-v2-${{ runner.os }}-${{ runner.arch }}-${{ inputs.rootfs_key }}
+
+      - name: Prepare Linux kernel facilities
+        if: inputs.stage == 'rootfs' || inputs.stage == 'assemble' || inputs.stage == 'verify'
+        run: |
+          sudo modprobe loop
+          sudo modprobe binfmt_misc
+          sudo modprobe btrfs
+
+      - name: Run sealed stage
+        id: build
+        env:
+          BUILD_STAGE: ${{ inputs.stage }}
+        run: |
+          mkdir -p _ci/logs
+          docker run --rm --privileged --network host \
+            --mount "type=bind,source=$GITHUB_WORKSPACE,target=/openwrt" \
+            --env CI=true --env GITHUB_RUN_ID --env GITHUB_RUN_ATTEMPT \
+            "$BUILDER_IMAGE" bash ci/r2s/stage.sh "$BUILD_STAGE" \
+            2>&1 | tee "_ci/logs/$BUILD_STAGE-$(date -u +%Y%m%dT%H%M%SZ).log"
+
+      - name: Collect cache statistics even after a failed build
+        id: finish
+        if: ${{ !cancelled() && steps.build.outcome != 'skipped' && (inputs.stage == 'kernel' || inputs.stage == 'uboot' || inputs.stage == 'rootfs') }}
+        run: |
+          docker run --rm --mount "type=bind,source=$GITHUB_WORKSPACE,target=/openwrt" \
+            --env CI=true "$BUILDER_IMAGE" bash ci/r2s/cache.sh finish
+
+      - name: Save completed compiler work
+        if: ${{ !cancelled() && inputs.use_cache && hashFiles('_ci/state/ccache.ready') != '' }}
+        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: external/cache/ccache
+          key: ${{ steps.ccache.outputs.cache-primary-key }}
+
+      - name: Save verified rootfs cache
+        if: ${{ !cancelled() && inputs.use_cache && inputs.stage == 'rootfs' && hashFiles('_ci/state/rootfs.ready') != '' && steps.finish.outcome == 'success' && steps.rootfs.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: external/cache/rootfs
+          key: ${{ steps.rootfs.outputs.cache-primary-key }}
+
+      - name: Transfer sealed stage result
+        if: success()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ${{ inputs.namespace }}-${{ inputs.stage == 'assemble' && 'image' || inputs.stage == 'verify' && 'release' || inputs.stage }}
+          path: _ci/artifacts/${{ inputs.stage == 'assemble' && 'image' || inputs.stage == 'verify' && 'release' || inputs.stage }}.tar
+          compression-level: 0
+          overwrite: true
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Upload stage diagnostics
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: r2s-debian13-logs-${{ inputs.stage }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            _ci/logs/
+            _ci/state/
+            output/debug/
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Stage summary
+        if: ${{ !cancelled() }}
+        env:
+          BUILD_STAGE: ${{ inputs.stage }}
+          BUILD_ID: ${{ inputs.namespace }}
+          OUTCOME: ${{ steps.build.outcome }}
+          CCACHE_HIT: ${{ steps.ccache.outputs.cache-hit }}
+          ROOTFS_HIT: ${{ steps.rootfs.outputs.cache-hit }}
+        run: |
+          {
+            printf "## R2S %s\n\nBuild context: \`%s\`\n\nResult: **%s**\n" "$BUILD_STAGE" "$BUILD_ID" "$OUTCOME"
+            printf '\nExact cache hits: compiler=%s; rootfs=%s.\n' "${CCACHE_HIT:-disabled}" "${ROOTFS_HIT:-disabled}"
+            for file in _ci/logs/ccache.txt _ci/logs/cache-sizes.txt _ci/logs/disk.txt; do
+              if [[ -f $file ]]; then printf '\n```text\n'; cat "$file"; printf '\n```\n'; fi
+            done
+          } >> "$GITHUB_STEP_SUMMARY"

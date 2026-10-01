@@ -88,7 +88,22 @@ while IFS= read -r package; do
     [[ $(chroot "$target" dpkg-query -W '-f=${Status}' "$package") == 'install ok installed' ]]
 done < ci/r2s/packages.list
 kernel_tree="kernel/$R2S_KERNEL_COMMIT"
-python3 -B ci/r2s/kernel.py verify "$kernel_tree/.config"
+kernel_config="$kernel_tree/.config"
+kernel_image="$kernel_tree/arch/riscv/boot/Image"
+kernel_dtb="$kernel_tree/arch/riscv/boot/dts/ky/x1_orangepi-r2s.dtb"
+uboot_tree="u-boot/$R2S_UBOOT_COMMIT"
+if [[ -d _ci/references/kernel ]]; then
+    kernel_config=_ci/references/kernel/kernel.config
+    kernel_image=_ci/references/kernel/Image
+    kernel_dtb=_ci/references/kernel/x1_orangepi-r2s.dtb
+    uboot_tree=_ci/references/uboot
+fi
+python3 -B ci/r2s/kernel.py verify "$kernel_config"
+if [[ -f _ci/references/kernel/kernel.release ]]; then
+    expected_release=$(< _ci/references/kernel/kernel.release)
+    actual_release=$(chroot "$target" /bin/sh -c 'set -- /lib/modules/*; test "$#" -eq 1; basename "$1"')
+    [[ $expected_release == "$actual_release" ]]
+fi
 chroot "$target" /bin/sh -eu -c '
     set -- /lib/modules/*
     test "$#" -eq 1
@@ -111,18 +126,18 @@ systemd-analyze --root="$target" verify \
 for file in /boot/Image /boot/dtb/ky/x1_orangepi-r2s.dtb; do
     installed=$(chroot "$target" sha256sum "$file" | cut -d' ' -f1)
     case "$file" in
-        /boot/Image) compiled=$(sha256sum "$kernel_tree/arch/riscv/boot/Image" | cut -d' ' -f1) ;;
-        *) compiled=$(sha256sum "$kernel_tree/arch/riscv/boot/dts/ky/x1_orangepi-r2s.dtb" | cut -d' ' -f1) ;;
+        /boot/Image) compiled=$(sha256sum "$kernel_image" | cut -d' ' -f1) ;;
+        *) compiled=$(sha256sum "$kernel_dtb" | cut -d' ' -f1) ;;
     esac
     [[ $installed == "$compiled" ]]
 done
-cp "$kernel_tree/.config" _ci/logs/kernel.config
+cp "$kernel_config" _ci/logs/kernel.config
 cp "$target/boot/boot.scr" "$target/boot/boot.cmd" "$target/boot/orangepiEnv.txt" _ci/state/boot/
 chroot "$target" sh -c 'readlink -f /boot/Image; readlink -f /boot/uInitrd; readlink -f /boot/dtb/ky/x1_orangepi-r2s.dtb' |
 while IFS= read -r file; do
     chroot "$target" cat "$file" > "_ci/state/boot/$(basename "$file")"
 done
-python3 -B - "$image" "u-boot/$R2S_UBOOT_COMMIT" <<'PY'
+python3 -B - "$image" "$uboot_tree" <<'PY'
 from pathlib import Path
 import sys
 image, tree = Path(sys.argv[1]), Path(sys.argv[2])

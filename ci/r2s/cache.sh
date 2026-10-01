@@ -20,8 +20,12 @@ case "${1:-}" in
         ;;
     finish)
         mkdir -p _ci/logs
-        ccache --show-stats > _ci/logs/ccache.txt
-        du -sh external/cache/{ccache,rootfs} _ci/cache/{sources,toolchain} > _ci/logs/cache-sizes.txt
+        if [[ -f _ci/state/ccache.ready ]]; then ccache --show-stats > _ci/logs/ccache.txt; fi
+        directories=()
+        for directory in external/cache/{ccache,rootfs} _ci/cache/{sources,toolchain}; do
+            [[ ! -d $directory ]] || directories+=("$directory")
+        done
+        if (( ${#directories[@]} )); then du -sh "${directories[@]}" > _ci/logs/cache-sizes.txt; fi
         df -h "$root" > _ci/logs/disk.txt
         # GHA archives only completed stages; never save a live rootfs/mount.
         if [[ -f _ci/state/rootfs.ready ]]; then

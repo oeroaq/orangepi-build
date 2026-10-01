@@ -564,6 +564,19 @@ if [[ ${IGNORE_UPDATES} != yes ]]; then
 	BUILD_HOST_TOOLS
 fi
 
+# Multijob assembly consumes only the sealed packages from its producer jobs.
+# Never silently remove or rebuild them if an artifact is incomplete.
+if [[ $REQUIRE_PREBUILT == yes ]]; then
+	[[ $BUILD_OPT == image && -z $CLEAN_LEVEL ]] || exit_with_error "Prebuilt-only assembly requires an image build without cleaning"
+	for required in "u-boot/${CHOSEN_UBOOT}_${REVISION}_${ARCH}.deb" \
+		"${CHOSEN_KERNEL}_${REVISION}_${ARCH}.deb" \
+		"${CHOSEN_KERNEL/image/dtb}_${REVISION}_${ARCH}.deb" \
+		"orangepi-firmware_${REVISION}_all.deb" \
+		"$RELEASE/${BSP_CLI_PACKAGE_FULLNAME}.deb"; do
+		[[ -s "$DEB_STORAGE/$required" ]] || exit_with_error "Missing locked component package" "$required"
+	done
+fi
+
 for option in $(tr ',' ' ' <<< "$CLEAN_LEVEL"); do
 	[[ $option != sources ]] && cleaning "$option"
 done

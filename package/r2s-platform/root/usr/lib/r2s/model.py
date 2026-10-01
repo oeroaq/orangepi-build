@@ -229,11 +229,11 @@ def firewall(config, wan, groups, existing=False, known_sets=(), docker_bridges=
              "masquerade": "nat hook postrouting priority srcnat - 5; policy accept;"}
     for chain, spec in types.items():
         if existing:
-            lines.append(f"flush chain {prefix} {chain}")
+            lines.append(f"flush chain {prefix} {json.dumps(chain)}")
         else:
-            lines.append(f"add chain {prefix} {chain} {{ type {spec} }}")
+            lines.append(f"add chain {prefix} {json.dumps(chain)} {{ type {spec} }}")
     def rule(chain, text):
-        lines.append(f"add rule {prefix} {chain} {text}")
+        lines.append(f"add rule {prefix} {json.dumps(chain)} {text}")
     rule("mark", f"ip daddr {lan} return")
     rule("mark", "ip6 daddr { fe80::/10, ff00::/8 } return")
     if config.get("ipv6_lan_prefix"):

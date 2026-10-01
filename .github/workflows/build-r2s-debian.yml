@@ -28,34 +28,35 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  image:
+  prepare:
     runs-on: ubuntu-22.04
-    timeout-minutes: 350
+    timeout-minutes: 120
+    outputs:
+      namespace: ${{ steps.context.outputs.namespace }}
+      compat: ${{ steps.context.outputs.compat }}
+      rootfs_key: ${{ steps.context.outputs.rootfs }}
     env:
       CI: 'true'
       PYTHONDONTWRITEBYTECODE: '1'
-      SEGMENT_DOWNLOAD_TIMEOUT_MINS: '10'
-      BUILDER_IMAGE: r2s-debian-builder:ci
       DOCKER_BUILD_RECORD_UPLOAD: 'false'
+      SEGMENT_DOWNLOAD_TIMEOUT_MINS: '10'
     defaults:
       run:
         shell: bash
     steps:
-      - name: Checkout builder
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
 
-      - name: Check CI helpers before downloading build inputs
+      - name: Check pipeline helpers
         run: |
           python3 -B -m unittest discover -s ci/r2s -p 'test_*.py' -v
-          for script in ci/r2s/run.sh ci/r2s/cache.sh ci/r2s/verify-image.sh ci/r2s/config.conf \
-            ci/r2s/configure-image.sh ci/r2s/storage.sh ci/r2s/linux-tests.sh \
-            scripts/general.sh scripts/debootstrap.sh scripts/main.sh scripts/distributions.sh scripts/compilation.sh; do
+          for script in ci/r2s/*.sh ci/r2s/config.conf scripts/general.sh scripts/debootstrap.sh \
+            scripts/main.sh scripts/distributions.sh scripts/compilation.sh; do
             bash -n "$script"
           done
 
-      - name: Prepare workspace and freeze sources
+      - name: Freeze all sources once
         id: locks
         env:
           SNAPSHOT: ${{ inputs.debian_snapshot }}
@@ -64,11 +65,10 @@ jobs:
         run: |
           mkdir -p _ci/{state,logs,home,tmp,cache/sources,cache/toolchain} external/cache/{rootfs,ccache}
           export HOME="$GITHUB_WORKSPACE/_ci/home" TMPDIR="$GITHUB_WORKSPACE/_ci/tmp"
-          df -h "$GITHUB_WORKSPACE"
-          python3 ci/r2s/prepare.py freeze --snapshot "$SNAPSHOT" \
+          python3 -B ci/r2s/prepare.py freeze --snapshot "$SNAPSHOT" \
             --kernel-commit "$KERNEL_COMMIT" --uboot-commit "$UBOOT_COMMIT"
 
-      - name: Restore verified toolchain archive
+      - name: Restore toolchain archive
         id: toolchain-cache
         if: inputs.use_cache
         uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
@@ -76,7 +76,7 @@ jobs:
           path: _ci/cache/toolchain/*.tar.xz
           key: r2s-toolchain-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.locks.outputs.toolchain_key }}
 
-      - name: Restore Git object caches
+      - name: Restore Git objects (single cache writer)
         id: sources-cache
         if: inputs.use_cache
         uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
@@ -86,16 +86,14 @@ jobs:
           restore-keys: |
             r2s-sources-v2-${{ runner.os }}-${{ runner.arch }}-
 
-      - name: Verify or download toolchain
-        run: python3 ci/r2s/prepare.py toolchain
+      - name: Verify preparation inputs
+        run: |
+          python3 -B ci/r2s/prepare.py toolchain
+          python3 -B ci/r2s/prepare.py sources
 
-      - name: Prepare pinned source checkouts
-        run: python3 ci/r2s/prepare.py sources
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
-
-      - name: Build Ubuntu 22.04 environment
+      - name: Build shared environment once
         id: container
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
@@ -107,63 +105,76 @@ jobs:
           cache-from: ${{ inputs.use_cache && 'type=gha,scope=r2s-debian-builder-v1' || '' }}
           cache-to: ${{ inputs.use_cache && 'type=gha,scope=r2s-debian-builder-v1,mode=max' || '' }}
 
-      - name: Record container identity and cache compatibility
-        id: environment
-        env:
-          BUILDER_COMMIT: ${{ steps.locks.outputs.builder_commit }}
-          SNAPSHOT: ${{ inputs.debian_snapshot }}
+      - name: Test Linux prerequisites and the nftables parser
         run: |
-          docker image inspect "$BUILDER_IMAGE" > _ci/state/container.lock.json
-          image_id=$(docker image inspect --format '{{.Id}}' "$BUILDER_IMAGE")
-          compat=$(printf '%s\n' "$image_id" "${{ steps.locks.outputs.toolchain_key }}" | sha256sum | cut -d' ' -f1)
-          echo "compat=$compat" >> "$GITHUB_OUTPUT"
-          echo "rootfs=$BUILDER_COMMIT-$SNAPSHOT-$compat" >> "$GITHUB_OUTPUT"
           sudo modprobe loop
           sudo modprobe binfmt_misc
           sudo modprobe btrfs
-
-      - name: Test Linux Btrfs and isolated router firewall
-        run: |
           docker run --rm --privileged \
             --mount "type=bind,source=$GITHUB_WORKSPACE,target=/openwrt" \
-            --env CI=true "$BUILDER_IMAGE" bash ci/r2s/linux-tests.sh
+            --env CI=true r2s-debian-builder:ci bash ci/r2s/linux-tests.sh
 
-      - name: Restore compiler cache
-        id: ccache-cache
-        if: inputs.use_cache
-        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
-        with:
-          path: external/cache/ccache
-          key: r2s-ccache-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.environment.outputs.compat }}-${{ github.run_id }}-${{ github.run_attempt }}
-          restore-keys: |
-            r2s-ccache-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.environment.outputs.compat }}-
-
-      - name: Restore exact Debian base rootfs
-        id: rootfs-cache
-        if: inputs.use_cache
-        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
-        with:
-          path: external/cache/rootfs
-          key: r2s-rootfs-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.environment.outputs.rootfs }}
-
-      - name: Build and verify R2S image
-        id: build
+      - name: Seal preparation, source bundles and OCI environment
+        id: context
         run: |
-          # Only the runner checkout is bind-mounted. Root is needed for
-          # chroot/mount/loop image assembly in this disposable container.
-          docker run --rm --privileged --network host \
-            --mount "type=bind,source=$GITHUB_WORKSPACE,target=/openwrt" \
-            --env CI=true "$BUILDER_IMAGE" bash ci/r2s/run.sh \
-            2>&1 | tee "_ci/logs/build-$(date -u +%Y%m%dT%H%M%SZ).log"
+          docker image inspect r2s-debian-builder:ci > _ci/state/container.lock.json
+          python3 -B ci/r2s/pipeline.py prepare --build-id "r2s-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
 
-      - name: Collect cache statistics
-        id: cache-finish
-        if: ${{ !cancelled() && steps.container.outcome == 'success' && steps.build.outcome != 'skipped' }}
-        run: |
-          docker run --rm --mount "type=bind,source=$GITHUB_WORKSPACE,target=/openwrt" \
-            --env CI=true "$BUILDER_IMAGE" bash ci/r2s/cache.sh finish
+      - name: Transfer build context
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ${{ steps.context.outputs.namespace }}-context
+          path: _ci/artifacts/context.tar
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 3
 
-      - name: Save completed toolchain stage
+      - name: Transfer exact OCI environment
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ${{ steps.context.outputs.namespace }}-environment
+          path: _ci/artifacts/environment.tar
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Transfer verified compiler archive
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ${{ steps.context.outputs.namespace }}-toolchain
+          path: _ci/artifacts/toolchain.tar
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Transfer kernel source bundle
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ${{ steps.context.outputs.namespace }}-source-kernel
+          path: _ci/artifacts/source-kernel.tar
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Transfer U-Boot source bundle
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ${{ steps.context.outputs.namespace }}-source-uboot
+          path: _ci/artifacts/source-uboot.tar
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Transfer firmware source bundle
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ${{ steps.context.outputs.namespace }}-source-firmware
+          path: _ci/artifacts/source-firmware.tar
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Save verified toolchain
         if: ${{ !cancelled() && inputs.use_cache && hashFiles('_ci/state/toolchain.ready') != '' && steps.toolchain-cache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
@@ -177,22 +188,101 @@ jobs:
           path: _ci/cache/sources
           key: ${{ steps.sources-cache.outputs.cache-primary-key }}
 
-      - name: Save compiler cache including completed work on failure
-        if: ${{ !cancelled() && inputs.use_cache && hashFiles('_ci/state/ccache.ready') != '' }}
-        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
+      - name: Preparation diagnostics
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          path: external/cache/ccache
-          key: ${{ steps.ccache-cache.outputs.cache-primary-key }}
+          name: r2s-debian13-logs-prepare-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            _ci/logs/
+            _ci/state/
+          retention-days: 14
+          if-no-files-found: warn
 
-      - name: Save complete verified rootfs
-        if: ${{ !cancelled() && inputs.use_cache && hashFiles('_ci/state/rootfs.ready') != '' && steps.cache-finish.outcome == 'success' && steps.rootfs-cache.outputs.cache-hit != 'true' }}
-        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
+  kernel:
+    needs: prepare
+    uses: ./.github/workflows/r2s-stage.yml
+    with:
+      stage: kernel
+      namespace: ${{ needs.prepare.outputs.namespace }}
+      compat: ${{ needs.prepare.outputs.compat }}
+      rootfs_key: ${{ needs.prepare.outputs.rootfs_key }}
+      use_cache: ${{ inputs.use_cache }}
+
+  uboot:
+    needs: prepare
+    uses: ./.github/workflows/r2s-stage.yml
+    with:
+      stage: uboot
+      namespace: ${{ needs.prepare.outputs.namespace }}
+      compat: ${{ needs.prepare.outputs.compat }}
+      rootfs_key: ${{ needs.prepare.outputs.rootfs_key }}
+      use_cache: ${{ inputs.use_cache }}
+
+  rootfs:
+    needs: prepare
+    uses: ./.github/workflows/r2s-stage.yml
+    with:
+      stage: rootfs
+      namespace: ${{ needs.prepare.outputs.namespace }}
+      compat: ${{ needs.prepare.outputs.compat }}
+      rootfs_key: ${{ needs.prepare.outputs.rootfs_key }}
+      use_cache: ${{ inputs.use_cache }}
+
+  assemble:
+    needs: [prepare, kernel, uboot, rootfs]
+    uses: ./.github/workflows/r2s-stage.yml
+    with:
+      stage: assemble
+      namespace: ${{ needs.prepare.outputs.namespace }}
+      compat: ${{ needs.prepare.outputs.compat }}
+      rootfs_key: ${{ needs.prepare.outputs.rootfs_key }}
+      use_cache: false
+
+  verify:
+    needs: [prepare, assemble]
+    uses: ./.github/workflows/r2s-stage.yml
+    with:
+      stage: verify
+      namespace: ${{ needs.prepare.outputs.namespace }}
+      compat: ${{ needs.prepare.outputs.compat }}
+      rootfs_key: ${{ needs.prepare.outputs.rootfs_key }}
+      use_cache: false
+
+  publish:
+    needs: [prepare, verify]
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          path: external/cache/rootfs
-          key: ${{ steps.rootfs-cache.outputs.cache-primary-key }}
+          persist-credentials: false
 
-      - name: Upload verified image, packages and checksums
-        if: ${{ success() && hashFiles('_ci/state/release.ready') != '' }}
+      - name: Download context
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ${{ needs.prepare.outputs.namespace }}-context
+          path: _ci/artifacts
+
+      - name: Validate preparation context
+        env:
+          BUILD_ID: ${{ needs.prepare.outputs.namespace }}
+        run: python3 -B ci/r2s/pipeline.py import context --build-id "$BUILD_ID"
+
+      - name: Download verified release
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ${{ needs.prepare.outputs.namespace }}-release
+          path: _ci/artifacts
+
+      - name: Validate publication payload
+        run: |
+          python3 -B ci/r2s/pipeline.py import release
+          (cd _ci/release && sha256sum -c sha256sums)
+
+      - name: Publish verified image, packages and checksums
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: r2s-debian13-${{ github.run_id }}-${{ github.run_attempt }}
@@ -201,38 +291,12 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-      - name: Upload build diagnostics
-        if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: r2s-debian13-logs-${{ github.run_id }}-${{ github.run_attempt }}
-          path: |
-            _ci/logs/
-            _ci/state/
-            output/debug/
-          if-no-files-found: warn
-          retention-days: 14
-
-      - name: Build summary
-        if: ${{ !cancelled() }}
+      - name: Release summary
         env:
-          TOOLCHAIN_HIT: ${{ steps.toolchain-cache.outputs.cache-hit }}
-          SOURCES_HIT: ${{ steps.sources-cache.outputs.cache-hit }}
-          CCACHE_HIT: ${{ steps.ccache-cache.outputs.cache-hit }}
-          ROOTFS_HIT: ${{ steps.rootfs-cache.outputs.cache-hit }}
-          BUILD_RESULT: ${{ steps.build.outcome }}
+          BUILD_ID: ${{ needs.prepare.outputs.namespace }}
         run: |
           {
-            printf '## R2S Debian 13 Router\n\nBuild: **%s**\n\n' "$BUILD_RESULT"
-            printf '| Cache | Exact hit |\n|---|---|\n'
-            printf '| Toolchain | %s |\n| Sources | %s |\n| ccache | %s |\n| Rootfs | %s |\n' \
-              "${TOOLCHAIN_HIT:-disabled}" "${SOURCES_HIT:-disabled}" "${CCACHE_HIT:-disabled}" "${ROOTFS_HIT:-disabled}"
-            printf '\nccache uses a rolling key; a prefix restore can still reuse compiler objects.\n'
-            for file in _ci/logs/ccache.txt _ci/logs/cache-sizes.txt _ci/logs/disk.txt; do
-              if [[ -f $file ]]; then printf '\n```text\n'; cat "$file"; printf '\n```\n'; fi
-            done
-            if [[ -f _ci/state/build-seconds ]]; then
-              printf '\nBuild duration: %s seconds.\n' "$(< _ci/state/build-seconds)"
-            fi
-            printf '\nArtifacts expire after 14 days. Hardware boot/eMMC tests are separate.\n'
+            printf "## R2S Debian 13 Router\n\nVerified build: \`%s\`\n\n" "$BUILD_ID"
+            printf 'Kernel, U-Boot and rootfs were built in parallel with one shared OCI environment and source context.\n\n'
+            printf "Download \`r2s-debian13-%s-%s\` in Artifacts. Retention: 14 days.\n" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT"
           } >> "$GITHUB_STEP_SUMMARY"

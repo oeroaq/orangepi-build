@@ -8,6 +8,32 @@ No utiliza `10.0.0.3`. El checkout se monta en `/openwrt`; temporales, fuentes,
 cachés, logs y artefactos del build quedan bajo ese bind mount. El contenedor
 es efímero y necesita privilegios para `chroot`, Btrfs, namespaces y loop devices.
 
+La construcción es multijob:
+
+```text
+prepare ─┬─ kernel ─┐
+         ├─ uboot ──┼─ assemble ─ verify ─ publish
+         └─ rootfs ─┘
+```
+
+`prepare` fija fuentes, toolchain y epoch una sola vez, ejecuta las pruebas Linux
+y exporta la imagen OCI exacta mediante `docker save`/Zstd. Los demás jobs cargan
+esa misma imagen y comprueban su identidad; no reconstruyen capas APT ni consultan
+ramas flotantes. Los tres componentes se ejecutan en paralelo, usando solo el
+bundle Git que necesitan. `rootfs` también produce firmware/BSP.
+
+Los artifacts intermedios son archivos tar con manifests de identidad e inventario
+SHA-256. Se validan rol, ejecución, commit del builder, fuentes, arquitectura,
+contenedor, toolchain y epoch antes de consumirlos. La extracción rechaza rutas
+externas, enlaces y entradas duplicadas. Los paquetes y las referencias compiladas
+del kernel/DTB/U-Boot se transfieren como resultados obligatorios, no como caché.
+
+`assemble` exige todos los paquetes precompilados y desactiva la limpieza: un
+paquete ausente hace fallar la etapa, nunca inicia una compilación implícita.
+`verify` vuelve a comprobar los bytes transferidos, descomprime y valida la imagen
+en un runner independiente. Solo `publish`, dependiente de `verify`, ofrece la
+entrega final con checksums. No se transfiere el árbol completo de objetos de build.
+
 Configuración inicial:
 
 | Función | Valor |
@@ -57,6 +83,13 @@ expandida, locks, manifests, logs y `sha256sums`. Se conserva **14 días**.
 Los diagnósticos se publican también si falla una etapa. No se crean releases
 automáticas.
 
+Los artifacts intermedios `r2s-RUN-PREPARE_ATTEMPT-{context,environment,kernel,...}`
+caducan a los **3 días**. Los logs por etapa y la entrega final duran 14 días.
+El nombre del contexto permanece estable al reintentar solamente jobs fallidos;
+cada manifest registra además el intento del productor. Se puede usar **Re-run
+failed jobs** dentro de esa ventana para reutilizar etapas completas. Reejecutar
+todo el workflow crea un contexto nuevo y descubre/fija las fuentes nuevamente.
+
 ```bash
 sha256sum -c sha256sums
 gzip -t Orangepir2s_*.img.gz
@@ -84,7 +117,7 @@ garantía de reproducción bit a bit sin conservar también ese entorno exacto.
 |---|---|
 | Toolchain | Archivo verificado, runner y checksum |
 | Git | Objetos bare, commits fijados; fallback para reutilizar objetos |
-| `ccache` | Máximo 2 GiB; compatibilidad contenedor/toolchain, clave nueva por ejecución |
+| `ccache` | Kernel 1792 MiB + U-Boot 256 MiB; claves y escritores independientes |
 | Rootfs | Commit del builder, snapshot y entorno; coincidencia exacta, sin fallback |
 | Docker Buildx | Capas del contenedor mediante backend `gha` |
 
@@ -93,6 +126,11 @@ se comprueba con LZ4, tar y SHA-256; no se cachean árboles con `.o`, paquetes
 generados ni imágenes. GitHub puede expulsar cachés: el arranque en frío sigue
 siendo válido. Cambiar el perfil invalida el rootfs; `ccache` comprueba los objetos
 contra sus entradas reales. El resumen muestra aciertos, tamaños y duración.
+
+Solo `prepare` guarda el cache Git/toolchain; los jobs paralelos no compiten por
+una misma clave. Los caches del compilador están separados por componente y el
+cache rootfs solo lo escribe `rootfs`. `assemble`, `verify` y `publish` no obtienen
+resultados compilados de ejecuciones anteriores desde caches.
 
 ## Paquetes y kernel
 
@@ -257,7 +295,7 @@ Checks locales:
 ```bash
 python3 -B -m unittest discover -s ci/r2s -p 'test_*.py' -v
 for script in ci/r2s/*.sh ci/r2s/config.conf; do bash -n "$script"; done
-actionlint .github/workflows/build-r2s-debian.yml
+actionlint .github/workflows/build-r2s-debian.yml .github/workflows/r2s-stage.yml
 ```
 
 Actions ejecuta primero pruebas Linux aisladas: Btrfs, intercambio/crecimiento
@@ -267,6 +305,11 @@ filesystems, subvolúmenes/fstab, configuración y unidades, paquetes, ausencia 
 secretos/desarrollo/cachés, ABI, kernel/DTB y hashes de los componentes de arranque.
 Solo publica la imagen cuando pasa la verificación y el gzip corresponde a sus
 bytes raw validados.
+
+Los nombres de cadena nftables se generan siempre entre comillas, incluidos
+`"mark"` y `"masquerade"`, que son palabras reservadas del parser. La regresión
+se comprueba en tests locales y el parser nft real se ejecuta en `prepare` antes
+de invertir tiempo en compilar los componentes.
 
 Las pruebas locales en macOS no ejecutan mounts/iptables ni una compilación
 RISC-V completa. La primera ejecución de Actions y la validación en R2S siguen

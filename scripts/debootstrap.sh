@@ -840,7 +840,8 @@ create_image()
 		IMAGE_TYPE=desktop
 	fi
 
-	local version="${BOARD^}_${REVISION}_${DISTRIBUTION,}_${RELEASE}_${IMAGE_TYPE}"${DESKTOP_ENVIRONMENT:+_$DESKTOP_ENVIRONMENT}"_linux$(grab_version "$LINUXSOURCEDIR")"
+	local image_kernel_version="${IMAGE_KERNEL_VERSION:-$(grab_version "$LINUXSOURCEDIR")}"
+	local version="${BOARD^}_${REVISION}_${DISTRIBUTION,}_${RELEASE}_${IMAGE_TYPE}"${DESKTOP_ENVIRONMENT:+_$DESKTOP_ENVIRONMENT}"_linux${image_kernel_version}"
 
 	if [[ ${RELEASE} == "raspi" ]]; then
 		local version="${BOARD^}_${REVISION}_raspios_bullseye_${IMAGE_TYPE}"${DESKTOP_ENVIRONMENT:+_$DESKTOP_ENVIRONMENT}"_linux$(grab_version "$LINUXSOURCEDIR")"

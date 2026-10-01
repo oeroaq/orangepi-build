@@ -80,7 +80,7 @@ class RouterTests(unittest.TestCase):
                                             "sources": ["10.0.0.20/32"], "domains": ["example.com"]}]})
         rules = model.firewall(self.config, "eth0", groups)
         drop = rules.index('ct mark 20993 oifname != "wg0" counter drop')
-        established = rules.index("forward ct state established,related accept")
+        established = rules.index('"forward" ct state established,related accept')
         self.assertLess(drop, established)
         self.assertIn("ct mark >= 20993", rules)
         self.assertIn("ip daddr != 10.0.0.0/24", rules)
@@ -97,7 +97,16 @@ class RouterTests(unittest.TestCase):
         self.assertNotIn('oifname "br-lan" accept', rules)
         self.assertIn('oifname "br-123456abcdef" accept', rules)
         self.assertLess(rules.index("th dport { 53, 853 } counter drop"),
-                        rules.index("forward ct state established,related accept"))
+                        rules.index('"forward" ct state established,related accept'))
+
+    def test_reserved_nft_chain_identifiers_are_quoted_on_create_and_reload(self):
+        rules = model.firewall(self.config, "eth0", [])
+        for name in ("mark", "masquerade"):
+            self.assertIn(f'add chain inet r2s_router "{name}" {{', rules)
+            self.assertIn(f'add rule inet r2s_router "{name}" ', rules)
+            self.assertNotIn(f"add chain inet r2s_router {name} ", rules)
+        reload = model.firewall(self.config, "eth0", [], existing=True)
+        self.assertIn('flush chain inet r2s_router "mark"', reload)
 
     def test_policy_ids_and_sqm_parameters_require_explicit_valid_values(self):
         for groups in ([{"id": 1, "interface": "wg0"}] * 2,
