@@ -306,10 +306,12 @@ secretos/desarrollo/cachés, ABI, kernel/DTB y hashes de los componentes de arra
 Solo publica la imagen cuando pasa la verificación y el gzip corresponde a sus
 bytes raw validados.
 
-Los nombres de cadena nftables se generan siempre entre comillas, incluidos
-`"mark"` y `"masquerade"`, que son palabras reservadas del parser. La regresión
-se comprueba en tests locales y el parser nft real se ejecuta en `prepare` antes
-de invertir tiempo en compilar los componentes.
+Los nombres de cadena nftables se generan como identificadores simples con
+prefijo `r2s_`: `r2s_input`, `r2s_forward`, `r2s_mark`, `r2s_masquerade`, etc.
+La sintaxis de comandos del parser no admite strings entre comillas en esa
+posición y los nombres sin prefijo `mark`/`masquerade` son palabras reservadas.
+Las palabras de hook/expresión se conservan. La regresión se comprueba en tests
+locales y el parser nft real se ejecuta en `prepare` antes de compilar componentes.
 
 Las pruebas locales en macOS no ejecutan mounts/iptables ni una compilación
 RISC-V completa. La primera ejecución de Actions y la validación en R2S siguen

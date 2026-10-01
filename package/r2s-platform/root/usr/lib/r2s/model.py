@@ -8,7 +8,10 @@ import uuid
 
 
 TABLE = "r2s_router"
-CHAINS = ("input", "forward", "output", "mark", "dns_redirect", "masquerade")
+# Command-form nft syntax accepts unquoted identifiers, not quoted strings.
+# Prefix every logical name so lexer keywords such as mark/masquerade never
+# become identifiers. Keep hook/statement keywords unchanged.
+CHAINS = {name: "r2s_" + name for name in ("input", "forward", "output", "mark", "dns_redirect", "masquerade")}
 INTERFACE = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9_.-]{0,14}\Z")
 DOMAIN = re.compile(r"(?=.{1,253}\Z)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{1,62}\Z")
 
@@ -229,11 +232,11 @@ def firewall(config, wan, groups, existing=False, known_sets=(), docker_bridges=
              "masquerade": "nat hook postrouting priority srcnat - 5; policy accept;"}
     for chain, spec in types.items():
         if existing:
-            lines.append(f"flush chain {prefix} {json.dumps(chain)}")
+            lines.append(f"flush chain {prefix} {CHAINS[chain]}")
         else:
-            lines.append(f"add chain {prefix} {json.dumps(chain)} {{ type {spec} }}")
+            lines.append(f"add chain {prefix} {CHAINS[chain]} {{ type {spec} }}")
     def rule(chain, text):
-        lines.append(f"add rule {prefix} {json.dumps(chain)} {text}")
+        lines.append(f"add rule {prefix} {CHAINS[chain]} {text}")
     rule("mark", f"ip daddr {lan} return")
     rule("mark", "ip6 daddr { fe80::/10, ff00::/8 } return")
     if config.get("ipv6_lan_prefix"):

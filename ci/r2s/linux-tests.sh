@@ -35,6 +35,7 @@ if [[ ${1:-} == --network ]]; then
     nsenter -t "$isp" -n ip link set isp-port up
     nsenter -t "$isp" -n ip route add 10.0.0.0/24 via 192.0.2.1
     sysctl -q -w net.ipv4.ip_forward=1
+    nft --version
     python3 -B - "$root" "$directory/firewall.nft" <<'PY'
 import json, model, sys
 from pathlib import Path
