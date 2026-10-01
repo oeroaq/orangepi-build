@@ -8,6 +8,8 @@ root=$(realpath "$(dirname "$0")/../..")
     exit 1
 }
 cd "$root"
+source ci/r2s/chroot-env.sh
+export OFFLINE_WORK=yes
 mkdir -p _ci/{tmp,home,state,logs} toolchains userpatches/overlay output/debug external/cache/{rootfs,ccache}
 export HOME="$root/_ci/home" TMPDIR="$root/_ci/tmp"
 git config --global --add safe.directory "$root"

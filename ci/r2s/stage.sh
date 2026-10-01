@@ -4,6 +4,8 @@ umask 022
 root=$(realpath "$(dirname "$0")/../..")
 [[ ${CI:-false} == true && $root == /openwrt && $EUID == 0 ]] || exit 1
 cd "$root"
+source ci/r2s/chroot-env.sh
+export OFFLINE_WORK=yes
 export R2S_STAGE=${1:?Specify kernel, uboot, rootfs, assemble or verify}
 case "$R2S_STAGE" in kernel|uboot|rootfs|assemble|verify) ;; *) exit 2 ;; esac
 mkdir -p _ci/{home,tmp,logs,state} output/{debs,debug} external/cache/{rootfs,ccache} userpatches/overlay

@@ -5,6 +5,7 @@ root=$(realpath "$(dirname "$0")/../..")
 image=$(realpath "$1")
 [[ ${CI:-false} == true && $root == /openwrt && $image == "$root/.tmp/rootfs-"* && $EUID == 0 ]] || exit 1
 cd "$root"
+source ci/r2s/chroot-env.sh
 package=$(python3 -B ci/r2s/build-package.py)
 # dpkg-deb writes its progress to stdout; the final line contains our package.
 package=${package##*$'\n'}

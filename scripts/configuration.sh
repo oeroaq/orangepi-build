@@ -14,7 +14,7 @@
 [[ -z $MAINTAINER ]] && MAINTAINER="Orange Pi" # deb signature
 [[ -z $MAINTAINERMAIL ]] && MAINTAINERMAIL="leeboby@aliyun.com" # deb signature
 [[ -z $DEB_COMPRESS ]] && DEB_COMPRESS="xz" # compress .debs with XZ by default. Use 'none' for faster/larger builds
-TZDATA=$(cat /etc/timezone) # Timezone for target is taken from host or defined here.
+TZDATA=${TZDATA:-$(cat /etc/timezone 2>/dev/null || printf 'Etc/UTC')} # Timezone for target is taken from host or defined here.
 USEALLCORES=yes # Use all CPU cores for compiling
 HOSTRELEASE=$(cat /etc/os-release | grep VERSION_CODENAME | cut -d"=" -f2)
 [[ -z $HOSTRELEASE ]] && HOSTRELEASE=$(cut -d'/' -f1 /etc/debian_version)

@@ -6,6 +6,7 @@ root=$(realpath "$(dirname "$0")/../..")
 image=$(realpath "$1")
 [[ $image == "$root/.tmp/"*.img ]]
 cd "$root"
+source ci/r2s/chroot-env.sh
 source _ci/state/build.env
 mkdir -p _ci/{logs,verify-root,verify-top,state/boot}
 target=$(realpath _ci/verify-root)
