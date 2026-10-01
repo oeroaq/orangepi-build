@@ -43,6 +43,10 @@ def inventory(directory):
     return files
 
 
+def directories(directory):
+    return sorted(path.relative_to(directory).as_posix() for path in directory.rglob("*") if path.is_dir())
+
+
 def identity():
     return json.loads((ROOT / "_ci/state/context.json").read_text())
 
@@ -54,7 +58,8 @@ def seal(role, directory, context):
     files = inventory(directory)
     if not files:
         raise ValueError("Empty artifact payload")
-    manifest = {"schema": 1, "role": role, "identity": context, "producer_attempt": os.environ.get("GITHUB_RUN_ATTEMPT", "local"), "files": files}
+    manifest = {"schema": 2, "role": role, "identity": context, "producer_attempt": os.environ.get("GITHUB_RUN_ATTEMPT", "local"),
+                "files": files, "directories": directories(directory)}
     with (directory / "manifest.json").open("x") as stream:
         json.dump(manifest, stream, indent=2, sort_keys=True)
     output = safe(ROOT / "_ci/artifacts" / f"{role}.tar")
@@ -63,7 +68,7 @@ def seal(role, directory, context):
         raise ValueError("Refusing to overwrite a sealed artifact")
     with tarfile.open(output, "w") as archive:
         for path in sorted(directory.rglob("*")):
-            if path.is_file():
+            if path.is_file() or path.is_dir():
                 archive.add(path, arcname=path.relative_to(directory).as_posix(), recursive=False)
     return output
 
@@ -71,9 +76,10 @@ def seal(role, directory, context):
 def verify(role, directory, expected):
     directory = safe(directory)
     manifest = json.loads((directory / "manifest.json").read_text())
-    if manifest.get("schema") != 1 or manifest.get("role") != role or manifest.get("identity") != expected:
+    if manifest.get("schema") != 2 or manifest.get("role") != role or manifest.get("identity") != expected:
         raise ValueError("Artifact role/build identity does not match this execution")
-    if not manifest.get("files") or inventory(directory) != manifest["files"]:
+    if (not manifest.get("files") or inventory(directory) != manifest["files"]
+            or directories(directory) != manifest.get("directories")):
         raise ValueError("Artifact inventory/checksums do not match its manifest")
     return manifest
 
@@ -83,7 +89,8 @@ def unpack(role, archive_path, expected=None, build_id=None):
     directory = safe(ROOT / "_ci/inbox" / role)
     if directory.exists():
         raise ValueError("Refusing to overwrite an imported artifact")
-    # Validate every member before extraction. Payloads are regular files only;
+    # Validate every member before extraction. Preserve empty directories too:
+    # Git requires refs/ even when all refs have moved into packed-refs.
     # rootfs/OCI/toolchain archives remain opaque, independently hashed files.
     with tarfile.open(archive_path, "r:") as archive:
         members = archive.getmembers()
@@ -91,12 +98,15 @@ def unpack(role, archive_path, expected=None, build_id=None):
         for member in members:
             path = PurePosixPath(member.name)
             if (path.is_absolute() or ".." in path.parts or not path.parts or member.name in names
-                    or not member.isfile() or member.size < 0 or member.size > 8_000_000_000):
+                    or not (member.isfile() or member.isdir()) or member.size < 0 or member.size > 8_000_000_000):
                 raise ValueError("Unsafe or duplicate artifact archive member")
             names.add(member.name)
         directory.mkdir(parents=True)
         for member in members:
             path = safe(directory / member.name)
+            if member.isdir():
+                path.mkdir(parents=True, exist_ok=True)
+                continue
             path.parent.mkdir(parents=True, exist_ok=True)
             with path.open("xb") as output, archive.extractfile(member) as source:
                 shutil.copyfileobj(source, output)
@@ -123,7 +133,9 @@ def copy_tree(source, destination):
     for path in source.rglob("*"):
         if path.is_symlink():
             raise ValueError("Unexpected symlink in an artifact transfer")
-        if path.is_file() and path.name != "manifest.json":
+        if path.is_dir():
+            safe(destination / path.relative_to(source)).mkdir(parents=True, exist_ok=True)
+        elif path.is_file() and path.name != "manifest.json":
             copy_file(path, destination / path.relative_to(source))
 
 

@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import tarfile
 import tempfile
+import subprocess
 import unittest
 from unittest.mock import patch
 
@@ -136,6 +137,33 @@ class PipelineTests(unittest.TestCase):
         (debs / "r2s-platform_1.0_all.deb").unlink()
         pipeline.import_artifact("image")
         self.assertEqual((debs / "r2s-platform_1.0_all.deb").read_bytes(), b"native platform package")
+
+    def test_packed_git_refs_survive_source_artifact_transfer(self):
+        env = {**os.environ, "HOME": str(self.root), "GIT_CONFIG_NOSYSTEM": "1"}
+        def git(*args):
+            return subprocess.check_output(["git", *args], cwd=self.root, env=env, text=True,
+                                           stderr=subprocess.DEVNULL).strip()
+        working = self.root / "working"
+        git("init", str(working))
+        (working / "source.c").write_text("int source;\n")
+        git("-C", str(working), "add", "source.c")
+        git("-C", str(working), "-c", "user.name=R2S test", "-c", "user.email=test@example.invalid", "commit", "-m", "source fixture")
+        commit = git("-C", str(working), "rev-parse", "HEAD")
+        payload = self.root / "source-payload"
+        payload.mkdir()
+        bare = payload / "kernel.git"
+        git("clone", "--bare", str(working), str(bare))
+        git("--git-dir", str(bare), "update-ref", "refs/heads/locked", commit)
+        git("--git-dir", str(bare), "pack-refs", "--all", "--prune")
+        self.assertTrue((bare / "refs").is_dir())
+        self.assertFalse((bare / "refs/heads/locked").exists())
+        archive = pipeline.seal("source-kernel", payload, self.context)
+        received = pipeline.unpack("source-kernel", archive, self.context)
+        destination = self.root / "copied/kernel.git"
+        pipeline.copy_tree(received / "kernel.git", destination)
+        self.assertTrue((destination / "refs").is_dir())
+        self.assertEqual(git("--git-dir", str(destination), "rev-parse", "refs/heads/locked"), commit)
+        git("--git-dir", str(destination), "fsck", "--no-dangling")
 
 
 if __name__ == "__main__":
