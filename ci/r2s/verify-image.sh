@@ -8,7 +8,7 @@ image=$(realpath "$1")
 cd "$root"
 source ci/r2s/chroot-env.sh
 source _ci/state/build.env
-mkdir -p _ci/{logs,verify-root,verify-top,state/boot}
+mkdir -p _ci/{logs,verify-root,verify-top,verify-tmp,state/boot}
 target=$(realpath _ci/verify-root)
 top=$(realpath _ci/verify-top)
 [[ $target == "$root/_ci/verify-root" && $top == "$root/_ci/verify-top" ]]
@@ -23,7 +23,7 @@ PY
 loop=''
 cleanup()
 {
-    for virtual in proc sys dev; do
+    for virtual in tmp proc sys dev; do
         mountpoint -q "$target/$virtual" && umount "$target/$virtual"
     done
     mountpoint -q "$target/boot" && umount "$target/boot"
@@ -65,6 +65,9 @@ mount -o remount,bind,ro "$target/dev"
 mount --bind /sys "$target/sys"
 mount -o remount,bind,ro "$target/sys"
 mount -t proc -o ro proc "$target/proc"
+# systemd-analyze v257 creates /tmp/systemd-analyze-* while checking aliases.
+# Keep these writes in the bind-mounted workspace, not in the image filesystem.
+mount --bind "$root/_ci/verify-tmp" "$target/tmp"
 chroot "$target" /bin/sh -eu -c '
     . /etc/os-release
     test "$ID" = debian && test "$VERSION_ID" = 13
