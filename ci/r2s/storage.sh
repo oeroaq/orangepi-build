@@ -31,7 +31,12 @@ case "${1:-}" in
             printf 'UUID=%s %s btrfs subvol=%s,compress=zstd:3,noatime 0 0\n' \
                 "$uuid" "${paths[$index]}" "${volumes[$index]}" >> "$source/etc/fstab"
         done
-        printf '\nextraargs=rootflags=subvol=@root\n' >> "$source/boot/orangepiEnv.txt"
+        # The vendor DTB declares 4 GiB; this R2S has 2 GiB. Keep the early
+        # console and all kernel messages while checking the hardware boot.
+        sed -i -E '/^(verbosity|console|earlycon|extraargs)=/d' "$source/boot/orangepiEnv.txt"
+        printf '\n%s\n' 'verbosity=7' 'console=serial' 'earlycon=on' \
+            'extraargs=rootflags=subvol=@root mem=2G ignore_loglevel keep_bootcon' \
+            >> "$source/boot/orangepiEnv.txt"
         ;;
     unmount)
         target=$(realpath "$2")

@@ -197,6 +197,30 @@ de almacenamiento ni redes del daemon. El firewall convive con iptables-nft y
 `DOCKER-USER`: mantener los defaults de Docker no debe cortar el forwarding LAN.
 Los bridges nuevos se detectan mediante netlink y un timer de mantenimiento.
 
+## Diagnóstico del arranque en la placa de 2 GiB
+
+La imagen genera estas opciones en `/boot/orangepiEnv.txt`:
+
+```ini
+verbosity=7
+console=serial
+earlycon=on
+extraargs=rootflags=subvol=@root mem=2G ignore_loglevel keep_bootcon
+```
+
+El DTB vendor fijado declara dos bancos de 2 GiB, mientras que la placa probada
+reporta 2 GiB en U-Boot. `mem=2G` limita la memoria utilizable por Linux si el
+U-Boot existente no corrige esos bancos antes del arranque. Los parámetros de
+consola muestran el progreso completo y mantienen la consola SBI durante el
+traspaso al controlador UART. Son parámetros de diagnóstico para esta placa;
+no confirman por sí solos compatibilidad con su OpenSBI/U-Boot ni un arranque
+correcto. El job `verify` comprueba las opciones dentro de la imagen final.
+
+Capturar al menos 90 segundos de salida serie, incluidos reinicios automáticos.
+Para retirar posteriormente la salida detallada, cambiar `verbosity=1` y quitar
+`ignore_loglevel keep_bootcon` de `extraargs`, conservando el subvolumen y el límite
+de memoria hasta validar el DTB efectivo en hardware.
+
 ## Primer acceso
 
 Después de grabar la imagen y antes de arrancar, colocar una **clave pública** en

@@ -28,9 +28,22 @@ def verify(root, top, boot_uuid, root_uuid):
     boot = [row for row in entries if row[1] == "/boot"]
     if len(boot) != 1 or boot[0][0] != "UUID=" + boot_uuid or boot[0][2] != "ext4":
         raise ValueError("Incorrect boot mount")
-    env = (root / "boot/orangepiEnv.txt").read_text()
-    if "rootdev=UUID=" + root_uuid not in env or "rootflags=subvol=@root" not in env:
+    env = {}
+    for line in (root / "boot/orangepiEnv.txt").read_text().splitlines():
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        key, value = line.split("=", 1)
+        if key in env:
+            raise ValueError("Duplicate boot environment option: " + key)
+        env[key] = value
+    args = env.get("extraargs", "").split()
+    if env.get("rootdev") != "UUID=" + root_uuid or env.get("rootfstype") != "btrfs" or "rootflags=subvol=@root" not in args:
         raise ValueError("Boot environment does not match the Btrfs root")
+    for key, expected in (("verbosity", "7"), ("console", "serial"), ("earlycon", "on")):
+        if env.get(key) != expected:
+            raise ValueError("Missing serial boot diagnostics: " + key)
+    if not {"mem=2G", "ignore_loglevel", "keep_bootcon"}.issubset(args):
+        raise ValueError("Missing 2 GiB memory limit or early console diagnostics")
     if (root / "etc/docker/daemon.json").exists():
         raise ValueError("Router profile must keep the Docker daemon's defaults")
     units = (root / "usr/lib/systemd/system").glob("r2s-*.service")
