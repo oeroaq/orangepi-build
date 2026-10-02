@@ -129,7 +129,7 @@ chroot "$target" /bin/sh -eu -c '
 ' >> _ci/logs/image-validation.txt 2>&1
 chroot "$target" dpkg-query -W -f='${Package}\t${Version}\t${Architecture}\n' > _ci/logs/image-packages.tsv
 python3 -B ci/r2s/verify-config.py "$target" "$top" "${loop}p1" "${loop}p2"
-systemd-analyze --root="$target" verify \
+chroot "$target" systemd-analyze verify \
     r2s-grow.service r2s-network.service r2s-refresh.service r2s-links.service \
     r2s-dns.service r2s-doh.service r2s-firstboot.service r2s-restore.service \
     r2s-metrics.service r2s-vnstat.service r2s-blocklist.service \
