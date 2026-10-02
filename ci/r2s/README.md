@@ -205,7 +205,7 @@ La imagen genera estas opciones en `/boot/orangepiEnv.txt`:
 verbosity=7
 console=serial
 earlycon=on
-extraargs=rootflags=subvol=@root mem=2G ignore_loglevel
+extraargs=rootflags=subvol=@root mem=2G ignore_loglevel init=/bin/sh panic=0
 ```
 
 El DTB vendor fijado declara dos bancos de 2 GiB, mientras que la placa probada
@@ -221,6 +221,34 @@ Capturar al menos 90 segundos de salida serie, incluidos reinicios automáticos.
 Para retirar posteriormente la salida detallada, cambiar `verbosity=1` y quitar
 `ignore_loglevel` de `extraargs`, conservando el subvolumen y el límite
 de memoria hasta validar el DTB efectivo en hardware.
+
+### Imagen temporal con shell como PID 1
+
+El perfil actual usa `init=/bin/sh`: el initramfs sigue cargando los drivers y
+montando el rootfs Btrfs, pero entrega PID 1 a una shell root por la consola serie
+en lugar de iniciar systemd. Los servicios de router, DHCP, DNS, SSH y Docker no
+se arrancan automáticamente en este modo. `panic=0` evita el reinicio automático
+del kernel ante un panic; no impide un reset del hardware o del firmware.
+`verify` comprueba estos parámetros y que `/bin/sh` sea ejecutable.
+
+Cuando aparezca el prompt, comprobar si permanece estable al menos 90 segundos:
+
+```sh
+cat /proc/cmdline
+cat /proc/uptime
+sleep 90
+cat /proc/uptime
+```
+
+No salir de la shell PID 1 con `exit`. Para probar la transición a systemd desde
+una shell estable, ejecutar `exec /sbin/init` y capturar la salida. Si el reset
+ocurre también antes de iniciar systemd, habrá que investigar el camino de
+handoff, los drivers, OpenSBI y la causa de reset del hardware. Si ocurre solo
+después del `exec`, habrá que aislar la inicialización de systemd y los servicios.
+
+Para restaurar el arranque normal, retirar `init=/bin/sh panic=0` de `extraargs`
+en `/boot/orangepiEnv.txt`. Con init normal se aplican las instrucciones de acceso
+y servicios descritas a continuación.
 
 ### Firmware RCPU y watchdogs heredados
 

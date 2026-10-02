@@ -44,6 +44,10 @@ def verify(root, top, boot_uuid, root_uuid):
             raise ValueError("Missing serial boot diagnostics: " + key)
     if not {"mem=2G", "ignore_loglevel"}.issubset(args) or "keep_bootcon" in args:
         raise ValueError("Incorrect 2 GiB memory limit or serial console handoff")
+    if [arg for arg in args if arg.startswith("init=")] != ["init=/bin/sh"]:
+        raise ValueError("Diagnostic image must hand off to /bin/sh instead of systemd")
+    if [arg for arg in args if arg.startswith("panic=")] != ["panic=0"]:
+        raise ValueError("Diagnostic image must not automatically reboot on a kernel panic")
     if (root / "etc/docker/daemon.json").exists():
         raise ValueError("Router profile must keep the Docker daemon's defaults")
     units = (root / "usr/lib/systemd/system").glob("r2s-*.service")

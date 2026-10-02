@@ -73,6 +73,7 @@ chroot "$target" /bin/sh -eu -c '
     . /etc/os-release
     test "$ID" = debian && test "$VERSION_ID" = 13
     test "$(dpkg --print-architecture)" = riscv64
+    test -x /bin/sh
     for file in /boot/Image /boot/uInitrd /boot/boot.scr /boot/orangepiEnv.txt /boot/dtb/ky/x1_orangepi-r2s.dtb; do
         test -s "$file"
     done
