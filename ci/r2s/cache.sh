@@ -8,6 +8,10 @@ case "${1:-}" in
     rootfs-check)
         test -s external/cache/rootfs/SHA256SUMS
         (cd external/cache/rootfs && sha256sum -c SHA256SUMS)
+        if [[ -f _ci/state/context.json ]]; then
+            expected=$(python3 -B -c 'import json; print(json.load(open("_ci/state/context.json"))["rootfs_recipe_sha256"])')
+            [[ $(< external/cache/rootfs/recipe.sha256) == "$expected" ]]
+        fi
         ;;
     rootfs)
         shopt -s nullglob
@@ -16,6 +20,9 @@ case "${1:-}" in
         lz4 -t "${archives[0]}"
         lz4 -dc "${archives[0]}" | tar -tf - > /dev/null
         (cd external/cache/rootfs && sha256sum ./*.tar.lz4 > SHA256SUMS)
+        if [[ -f _ci/state/context.json ]]; then
+            python3 -B -c 'import json; print(json.load(open("_ci/state/context.json"))["rootfs_recipe_sha256"])' > external/cache/rootfs/recipe.sha256
+        fi
         touch _ci/state/rootfs.ready
         ;;
     finish)

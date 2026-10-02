@@ -165,6 +165,22 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(git("--git-dir", str(destination), "rev-parse", "refs/heads/locked"), commit)
         git("--git-dir", str(destination), "fsck", "--no-dangling")
 
+    def test_base_cache_tracks_bootstrap_inputs_not_late_validator_changes(self):
+        for name in pipeline.BOOTSTRAP_FILES:
+            path = self.root / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("baseline recipe")
+        initial = pipeline.rootfs_recipe()
+        late = self.root / "ci/r2s/verify-image.sh"
+        late.write_text("validator correction")
+        self.assertEqual(initial, pipeline.rootfs_recipe())
+        platform = self.root / "package/r2s-platform/root/usr/share/r2s/layout.json"
+        platform.parent.mkdir(parents=True)
+        platform.write_text("image-only layout contract")
+        self.assertEqual(initial, pipeline.rootfs_recipe())
+        (self.root / "ci/r2s/packages.list").write_text("new required Debian package")
+        self.assertNotEqual(initial, pipeline.rootfs_recipe())
+
 
 if __name__ == "__main__":
     unittest.main()

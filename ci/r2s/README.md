@@ -128,7 +128,7 @@ garantía de reproducción bit a bit sin conservar también ese entorno exacto.
 | Toolchain | Archivo verificado, runner y checksum |
 | Git | Objetos bare, commits fijados; fallback para reutilizar objetos |
 | `ccache` | Kernel 1792 MiB + U-Boot 256 MiB; claves y escritores independientes |
-| Rootfs | Commit del builder, snapshot y entorno; coincidencia exacta, sin fallback |
+| Rootfs | Hash de receta de bootstrap, snapshot y entorno; coincidencia exacta, sin fallback |
 | Docker Buildx | Capas del contenedor mediante backend `gha` |
 
 Las etapas completas se guardan aunque falle después el ensamblado. El rootfs
@@ -136,6 +136,12 @@ se comprueba con LZ4, tar y SHA-256; no se cachean árboles con `.o`, paquetes
 generados ni imágenes. GitHub puede expulsar cachés: el arranque en frío sigue
 siendo válido. Cambiar el perfil invalida el rootfs; `ccache` comprueba los objetos
 contra sus entradas reales. El resumen muestra aciertos, tamaños y duración.
+
+El hash de receta incluye manifiesto de paquetes, perfil, entorno chroot, scripts
+del builder y configuraciones que participan en debootstrap. Se guarda y comprueba
+también dentro del cache. Una corrección del validador o del paquete de integración
+aplicado después del bootstrap no obliga a repetir la instalación de toda la base;
+sí se regeneran firmware/BSP, r2s-platform y sus manifests con el commit actual.
 
 Solo `prepare` guarda el cache Git/toolchain; los jobs paralelos no compiten por
 una misma clave. Los caches del compilador están separados por componente y el

@@ -15,6 +15,9 @@ ROOT = Path(__file__).resolve().parents[2]
 ROLES = {"context", "environment", "toolchain", "source-kernel", "source-uboot", "source-firmware",
          "kernel", "uboot", "rootfs", "image", "release"}
 LOCK_FILES = ("sources.lock.json", "toolchain.lock.json", "container.lock.json", "build.env", "source-date-epoch")
+BOOTSTRAP_FILES = ("ci/r2s/config.conf", "ci/r2s/packages.list", "ci/r2s/chroot-env.sh", "ci/r2s/stage.sh", "ci/r2s/Dockerfile")
+BOOTSTRAP_DIRS = ("scripts", "external/config/cli", "external/config/distributions", "external/config/optional",
+                  "external/config/sources", "external/config/boards")
 
 
 def safe(path):
@@ -49,6 +52,36 @@ def directories(directory):
 
 def identity():
     return json.loads((ROOT / "_ci/state/context.json").read_text())
+
+
+def rootfs_recipe():
+    """Fingerprint all bootstrap inputs, excluding late image/package validators.
+
+    Firmware/BSP and r2s-platform are rebuilt in their current job; the cached
+    object is only the signed Debian base plus its explicitly selected packages.
+    """
+    paths = [ROOT / name for name in BOOTSTRAP_FILES]
+    for name in BOOTSTRAP_DIRS:
+        paths += list((ROOT / name).rglob("*"))
+    values = {}
+    for path in sorted(set(paths)):
+        if path.is_symlink():
+            target = safe(path)
+            value = {"link": os.readlink(path)}
+            if target.is_file():
+                value["sha256"] = digest(target)
+            elif target.is_dir():
+                value["target_files"] = {entry.relative_to(target).as_posix(): digest(safe(entry))
+                                         for entry in target.rglob("*") if entry.is_file()}
+            values[path.relative_to(ROOT).as_posix()] = value
+            continue
+        if path.is_file():
+            safe(path)
+            values[path.relative_to(ROOT).as_posix()] = digest(path)
+    for name in BOOTSTRAP_FILES:
+        if name not in values:
+            raise ValueError("Missing bootstrap recipe input: " + name)
+    return hashlib.sha256(json.dumps(values, sort_keys=True).encode()).hexdigest()
 
 
 def seal(role, directory, context):
@@ -153,7 +186,8 @@ def prepare(build_id):
                "builder_commit": sources["builder_commit"], "architecture": "riscv64",
                "sources_sha256": digest(state / "sources.lock.json"), "sources": sources["sources"],
                "debian_snapshot": sources["debian_snapshot"], "source_date_epoch": int(epoch),
-               "container_id": container["Id"], "toolchain_sha256": json.loads((state / "toolchain.lock.json").read_text())["sha256"]}
+               "container_id": container["Id"], "toolchain_sha256": json.loads((state / "toolchain.lock.json").read_text())["sha256"],
+               "rootfs_recipe_sha256": rootfs_recipe()}
     with (state / "context.json").open("x") as stream:
         json.dump(context, stream, indent=2, sort_keys=True)
     directory = ROOT / "_ci/payload/context/state"
@@ -183,7 +217,7 @@ def prepare(build_id):
     seal("environment", environment, context)
     compat = hashlib.sha256((context["container_id"] + context["toolchain_sha256"]).encode()).hexdigest()
     with open(os.environ["GITHUB_OUTPUT"], "a") as stream:
-        stream.write(f"namespace={build_id}\ncompat={compat}\nrootfs={context['builder_commit']}-{context['debian_snapshot']}-{compat}\n")
+        stream.write(f"namespace={build_id}\ncompat={compat}\nrootfs={context['rootfs_recipe_sha256']}-{context['debian_snapshot']}-{compat}\n")
 
 
 def import_artifact(role, build_id=None):
