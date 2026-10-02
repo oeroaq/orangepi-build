@@ -23,6 +23,9 @@ PY
 loop=''
 cleanup()
 {
+    for virtual in proc sys dev; do
+        mountpoint -q "$target/$virtual" && umount "$target/$virtual"
+    done
     mountpoint -q "$target/boot" && umount "$target/boot"
     mountpoint -q "$target" && umount "$target"
     mountpoint -q "$top" && umount "$top"
@@ -55,6 +58,13 @@ for name in @root @data @log @snapshots @docker @containerd; do
 done
 mount -o ro,subvol=@root "${loop}p2" "$target"
 mount -o ro,noload "${loop}p1" "$target/boot"
+# Guest programs (dnsmasq, TLS, SSH checks) need the runtime device/proc
+# interfaces. Bind them only for validation; firmware files stay read-only.
+mount --bind /dev "$target/dev"
+mount -o remount,bind,ro "$target/dev"
+mount --bind /sys "$target/sys"
+mount -o remount,bind,ro "$target/sys"
+mount -t proc -o ro proc "$target/proc"
 chroot "$target" /bin/sh -eu -c '
     . /etc/os-release
     test "$ID" = debian && test "$VERSION_ID" = 13
