@@ -3,6 +3,7 @@ import gzip
 from pathlib import Path
 import struct
 import subprocess
+import tempfile
 import unittest
 import zlib
 
@@ -103,6 +104,33 @@ setenv() { :; }
         self.assertIn("watchdog command unavailable", result.stdout)
         self.assertIn("KERNEL_HANDOFF", result.stdout)
         self.assertNotIn("STOP:", result.stdout)
+
+    def test_initramfs_hook_accepts_existing_firmware_only_when_identical(self):
+        parent = boot.ROOT / "_ci/tests"
+        parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=parent) as directory:
+            root = Path(directory)
+            self.assertTrue(root.resolve().is_relative_to(parent.resolve()))
+            source = root / "esos.elf"
+            source.write_bytes(b"RCPU firmware")
+            functions = root / "hook-functions"
+            functions.write_text("copy_file() { return 1; }\n")
+            hook = (boot.ROOT / "package/r2s-platform/root/etc/initramfs-tools/hooks/r2s-firmware").read_text()
+            hook = hook.replace(". /usr/share/initramfs-tools/hook-functions", ". '" + str(functions) + "'")
+            for prefix in ("test -s ", "copy_file firmware ", "cmp -s "):
+                hook = hook.replace(prefix + "/usr/lib/firmware/esos.elf", prefix + "'" + str(source) + "'")
+            for number, (location, data, expected) in enumerate((
+                    ("lib/firmware", b"RCPU firmware", 0),
+                    ("usr/lib/firmware", b"RCPU firmware", 0),
+                    ("lib/firmware", b"wrong firmware", 1))):
+                destination = root / str(number)
+                target = destination / location
+                target.mkdir(parents=True)
+                (target / "esos.elf").write_bytes(data)
+                script = "DESTDIR='" + str(destination) + "'\n" + hook
+                result = subprocess.run(["sh", "-c", script], text=True, capture_output=True)
+                with self.subTest(location=location, data=data):
+                    self.assertEqual(result.returncode, expected, result.stderr)
 
 
 if __name__ == "__main__":
