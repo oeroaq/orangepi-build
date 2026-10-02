@@ -131,7 +131,7 @@ class RouterTests(unittest.TestCase):
     def test_layout_requires_fixed_start_but_accepts_growth(self):
         layout = json.loads((PLATFORM / "usr/share/r2s/layout.json").read_text())
         table = {"partitiontable": {"label": "dos", "sectorsize": 512, "partitions": [
-            {"start": layout["boot_start"], "size": layout["boot_sectors"], "type": "83"},
+            {"start": layout["boot_start"], "size": layout["boot_sectors"], "type": "ea"},
             {"start": layout["root_start"], "size": 12000000, "type": "83"}]}}
         model.validate_layout(table, layout)
         table["partitiontable"]["partitions"][1]["size"] += 1000000
@@ -139,6 +139,18 @@ class RouterTests(unittest.TestCase):
         table["partitiontable"]["partitions"][1]["start"] += 1
         with self.assertRaises(ValueError):
             model.validate_layout(table, layout)
+
+    def test_actual_extended_boot_partition_type_is_part_of_the_contract(self):
+        layout = json.loads((PLATFORM / "usr/share/r2s/layout.json").read_text())
+        table = {"partitiontable": {"label": "dos", "sectorsize": 512, "partitions": [
+            {"start": 61440, "size": 1048576, "type": "ea"},
+            {"start": 1110016, "size": 3371008, "type": "83"}]}}
+        model.validate_layout(table, layout)
+        for index, bad in ((0, "83"), (0, "ef"), (1, "ea")):
+            changed = copy.deepcopy(table)
+            changed["partitiontable"]["partitions"][index]["type"] = bad
+            with self.subTest(index=index, bad=bad), self.assertRaises(ValueError):
+                model.validate_layout(changed, layout)
 
 
 class FilesystemTests(unittest.TestCase):

@@ -101,7 +101,9 @@ def validate_layout(table, layout):
     if table["label"] != "dos" or table.get("sectorsize", 512) != 512 or len(parts) != 2:
         raise ValueError("Expected the two-partition R2S MBR layout")
     if (parts[0]["start"] != layout["boot_start"] or parts[0]["size"] != layout["boot_sectors"]
-            or parts[1]["start"] != layout["root_start"] or any(p["type"] != "83" for p in parts)):
+            or parts[1]["start"] != layout["root_start"]
+            or parts[0]["type"].lower() != layout["boot_type"]
+            or parts[1]["type"].lower() != layout["root_type"]):
         raise ValueError("R2S partition offsets/types do not match the layout")
     if parts[1]["size"] <= 0:
         raise ValueError("Empty Btrfs partition")

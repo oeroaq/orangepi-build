@@ -4,7 +4,9 @@
   "sector_size": 512,
   "boot_start": 61440,
   "boot_sectors": 1048576,
+  "boot_type": "ea",
   "root_start": 1110016,
+  "root_type": "83",
   "subvolumes": {
     "@root": "/",
     "@data": "/data",
