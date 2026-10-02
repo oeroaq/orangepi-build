@@ -83,6 +83,10 @@ chroot "$target" /bin/sh -eu -c '
         test "$(dpkg-query -W -f="\${Status}" "$package")" = "install ok installed"
     done
     test ! -e /etc/docker/daemon.json
+    test -s /usr/lib/firmware/esos.elf
+    test -x /etc/initramfs-tools/hooks/r2s-firmware
+    dpkg-query -S /usr/lib/firmware/esos.elf | grep -q "^r2s-platform:"
+    dpkg-query -S /etc/initramfs-tools/hooks/r2s-firmware | grep -q "^r2s-platform:"
     python3 -B /usr/lib/r2s/runtime.py check
     visudo -cf /etc/sudoers
     dnsmasq --version | grep -w nftset
@@ -133,6 +137,7 @@ chroot "$target" /bin/sh -eu -c '
 ' >> _ci/logs/image-validation.txt 2>&1
 chroot "$target" dpkg-query -W -f='${Package}\t${Version}\t${Architecture}\n' > _ci/logs/image-packages.tsv
 python3 -B ci/r2s/verify-config.py "$target" "$top" "${loop}p1" "${loop}p2"
+python3 -B ci/r2s/boot.py verify "$target" > _ci/logs/boot-validation.txt
 chroot "$target" systemd-analyze verify \
     r2s-grow.service r2s-network.service r2s-refresh.service r2s-links.service \
     r2s-dns.service r2s-doh.service r2s-firstboot.service r2s-restore.service \

@@ -12,6 +12,7 @@ package=${package##*$'\n'}
 [[ $package == "$root/output/debs/r2s-platform_"*.deb && -s $package ]]
 cp "$package" "$image/tmp/r2s-platform.deb"
 chroot "$image" dpkg -i /tmp/r2s-platform.deb
+python3 -B ci/r2s/boot.py install "$image"
 chroot "$image" sh -eu -c '
     rm -f /tmp/r2s-platform.deb
     passwd -l root

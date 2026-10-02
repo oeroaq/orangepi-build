@@ -16,6 +16,11 @@ def main():
     if stage.exists():
         raise SystemExit("Refusing to overwrite an existing package staging tree")
     shutil.copytree(ROOT / "package/r2s-platform/root", stage)
+    # This RCPU binary is versioned with the BSP, not part of the generic
+    # orangepi-firmware package. Give it a native package owner and initrd hook.
+    firmware = stage / "usr/lib/firmware"
+    firmware.mkdir(parents=True)
+    shutil.copyfile(ROOT / "external/packages/bsp/ky/usr/lib/firmware/esos.elf", firmware / "esos.elf")
     debian = stage / "DEBIAN"
     debian.mkdir()
     version = "1.0+git." + subprocess.check_output(["git", "rev-parse", "--short=12", "HEAD"], cwd=ROOT, text=True).strip()
@@ -28,7 +33,8 @@ def main():
     (debian / "conffiles").write_text("\n".join(conffiles) + "\n")
     for path in stage.rglob("*"):
         if path.is_file():
-            if path.parent.name in ("sbin", "dispatcher.d") or path.name in ("postinst", "watch-links"):
+            if (path.parent.name in ("sbin", "dispatcher.d") or path.name in ("postinst", "watch-links")
+                    or path.parent == stage / "etc/initramfs-tools/hooks"):
                 os.chmod(path, 0o755)
             elif path.parent.name == "sudoers.d":
                 os.chmod(path, 0o440)

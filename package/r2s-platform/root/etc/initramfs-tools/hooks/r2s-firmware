@@ -1,0 +1,10 @@
+#!/bin/sh
+# The built-in remoteproc driver needs RCPU firmware before mounting rootfs.
+set -eu
+case "${1:-}" in
+    prereqs) exit 0 ;;
+esac
+# shellcheck disable=SC1091
+. /usr/share/initramfs-tools/hook-functions
+test -s /usr/lib/firmware/esos.elf
+copy_file firmware /usr/lib/firmware/esos.elf

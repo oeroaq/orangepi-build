@@ -32,10 +32,11 @@ case "${1:-}" in
                 "$uuid" "${paths[$index]}" "${volumes[$index]}" >> "$source/etc/fstab"
         done
         # The vendor DTB declares 4 GiB; this R2S has 2 GiB. Keep the early
-        # console and all kernel messages while checking the hardware boot.
+        # kernel messages while checking the hardware boot. The UART console
+        # has been validated; let it replace SBI instead of printing twice.
         sed -i -E '/^(verbosity|console|earlycon|extraargs)=/d' "$source/boot/orangepiEnv.txt"
         printf '\n%s\n' 'verbosity=7' 'console=serial' 'earlycon=on' \
-            'extraargs=rootflags=subvol=@root mem=2G ignore_loglevel keep_bootcon' \
+            'extraargs=rootflags=subvol=@root mem=2G ignore_loglevel' \
             >> "$source/boot/orangepiEnv.txt"
         ;;
     unmount)

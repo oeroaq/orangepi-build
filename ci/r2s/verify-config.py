@@ -42,8 +42,8 @@ def verify(root, top, boot_uuid, root_uuid):
     for key, expected in (("verbosity", "7"), ("console", "serial"), ("earlycon", "on")):
         if env.get(key) != expected:
             raise ValueError("Missing serial boot diagnostics: " + key)
-    if not {"mem=2G", "ignore_loglevel", "keep_bootcon"}.issubset(args):
-        raise ValueError("Missing 2 GiB memory limit or early console diagnostics")
+    if not {"mem=2G", "ignore_loglevel"}.issubset(args) or "keep_bootcon" in args:
+        raise ValueError("Incorrect 2 GiB memory limit or serial console handoff")
     if (root / "etc/docker/daemon.json").exists():
         raise ValueError("Router profile must keep the Docker daemon's defaults")
     units = (root / "usr/lib/systemd/system").glob("r2s-*.service")

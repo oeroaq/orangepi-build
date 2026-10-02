@@ -205,21 +205,40 @@ La imagen genera estas opciones en `/boot/orangepiEnv.txt`:
 verbosity=7
 console=serial
 earlycon=on
-extraargs=rootflags=subvol=@root mem=2G ignore_loglevel keep_bootcon
+extraargs=rootflags=subvol=@root mem=2G ignore_loglevel
 ```
 
 El DTB vendor fijado declara dos bancos de 2 GiB, mientras que la placa probada
 reporta 2 GiB en U-Boot. `mem=2G` limita la memoria utilizable por Linux si el
 U-Boot existente no corrige esos bancos antes del arranque. Los parámetros de
-consola muestran el progreso completo y mantienen la consola SBI durante el
-traspaso al controlador UART. Son parámetros de diagnóstico para esta placa;
+consola muestran el progreso completo por SBI hasta que `ttyS0` toma el relevo,
+sin `keep_bootcon` para evitar mensajes duplicados sobre la misma UART.
+Son parámetros de diagnóstico para esta placa;
 no confirman por sí solos compatibilidad con su OpenSBI/U-Boot ni un arranque
 correcto. El job `verify` comprueba las opciones dentro de la imagen final.
 
 Capturar al menos 90 segundos de salida serie, incluidos reinicios automáticos.
 Para retirar posteriormente la salida detallada, cambiar `verbosity=1` y quitar
-`ignore_loglevel keep_bootcon` de `extraargs`, conservando el subvolumen y el límite
+`ignore_loglevel` de `extraargs`, conservando el subvolumen y el límite
 de memoria hasta validar el DTB efectivo en hardware.
+
+### Firmware RCPU y watchdogs heredados
+
+`r2s-platform` instala el `esos.elf` versionado del BSP KY y un hook estricto de
+initramfs. El driver `CONFIG_X1_REMOTEPROC=y` intenta cargarlo antes de montar la
+raíz; instalarlo solo en rootfs no basta. `verify` comprueba su propietario Debian
+y compara los bytes del firmware en BSP, rootfs y el `uInitrd` real de `/boot`.
+
+Antes de `booti`, `boot-watchdogs.cmd` detiene los watchdogs heredados de U-Boot:
+`PMIC_WDT` y el SoC `watchdog@D4080000` (también acepta el nombre en minúsculas).
+El driver SPM8821 del bootloader limita el timeout real a 16 segundos aunque el
+banner anuncie 60. El DTB vendor deshabilita el watchdog del SoC y no proporciona
+un driver para alimentar el del PMIC. Un error al detener un dispositivo detectado
+aborta el script en vez de continuar con un temporizador activo. No se modifica
+el entorno persistente del bootloader. Si el bootloader no dispone de `wdt`, se
+muestra ese estado en consola. `verify` valida tanto el script como los CRC y el
+contenido de su `boot.scr` compilado. La comprobación definitiva del fin del bucle
+de reinicios requiere volver a arrancar la nueva imagen en la placa.
 
 ## Primer acceso
 
