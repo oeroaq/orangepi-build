@@ -74,6 +74,10 @@ chroot "$target" /bin/sh -eu -c '
     test "$ID" = debian && test "$VERSION_ID" = 13
     test "$(dpkg --print-architecture)" = riscv64
     test -x /bin/sh
+    test -x /usr/sbin/r2s-debug
+    sh -n /usr/sbin/r2s-debug
+    /usr/sbin/r2s-debug --help
+    strace -V
     for file in /boot/Image /boot/uInitrd /boot/boot.scr /boot/orangepiEnv.txt /boot/dtb/ky/x1_orangepi-r2s.dtb; do
         test -s "$file"
     done
@@ -88,6 +92,7 @@ chroot "$target" /bin/sh -eu -c '
     test -x /etc/initramfs-tools/hooks/r2s-firmware
     dpkg-query -S /usr/lib/firmware/esos.elf | grep -q "^r2s-platform:"
     dpkg-query -S /etc/initramfs-tools/hooks/r2s-firmware | grep -q "^r2s-platform:"
+    dpkg-query -S /usr/sbin/r2s-debug | grep -q "^r2s-platform:"
     python3 -B /usr/lib/r2s/runtime.py check
     visudo -cf /etc/sudoers
     dnsmasq --version | grep -w nftset

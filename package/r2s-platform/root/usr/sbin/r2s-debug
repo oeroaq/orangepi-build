@@ -1,0 +1,182 @@
+#!/bin/sh
+# Fixed diagnostic scenarios; do not depend on Python or a running systemd.
+set -eu
+
+usage()
+{
+    cat <<'EOF'
+Usage: r2s-debug info|python|python-init|systemd
+  info         Show the boot/runtime contract and strace version.
+  python       Trace python3 --version as a child of the PID 1 shell.
+  python-init  Trace Python initialization and its first print.
+  systemd      Trace the PID 1 handoff; use: exec r2s-debug systemd
+Kernel and strace logs are sent to the console and /data/r2s-debug/<run>/.
+EOF
+}
+
+mode=${1:---help}
+case "$mode" in
+    --help|-h) usage; exit 0 ;;
+    info|python|python-init|systemd) ;;
+    *) usage >&2; exit 2 ;;
+esac
+# Check this before mounts, tracing or any child process is started.
+if [ "$mode" = systemd ] && [ "$$" -ne 1 ]; then
+    printf '%s\n' 'Use exec r2s-debug systemd from the PID 1 shell.' >&2
+    exit 2
+fi
+if [ "$mode" = info ]; then
+    [ "$(id -u)" -eq 0 ] || { printf '%s\n' 'Run as root.' >&2; exit 1; }
+    uname -a
+    cat /proc/cmdline /proc/uptime /proc/1/comm
+    strace -V
+    findmnt --mountpoint / -o SOURCE,FSTYPE,FSROOT,OPTIONS
+    exit 0
+fi
+
+trace=''
+reader=''
+target=''
+tracer=''
+# Called from the EXIT handler below.
+# shellcheck disable=SC2329
+cleanup()
+{
+    if [ -n "$trace" ]; then
+        printf '0\n' > "$trace/tracing_on" || true
+    fi
+    for process in "$target" "$tracer" "$reader"; do
+        [ -z "$process" ] || kill "$process" 2>/dev/null || true
+    done
+    if [ -n "$target" ]; then kill -CONT "$target" 2>/dev/null || true; fi
+    if [ -n "$reader" ]; then wait "$reader" 2>/dev/null || true; fi
+    if [ -n "$trace" ]; then rmdir "$trace" 2>/dev/null || true; fi
+    sync || true
+}
+# Keep the diagnostic console alive if a helper fails while it is PID 1.
+# shellcheck disable=SC2329
+finish()
+{
+    result=$?
+    trap - EXIT HUP INT TERM
+    cleanup
+    if [ "$$" -eq 1 ]; then
+        printf 'R2S_DEBUG: helper exited (%s), returning to PID 1 shell\n' "$result" >&2
+        exec /bin/sh
+    fi
+    exit "$result"
+}
+trap finish EXIT
+trap 'exit 1' HUP INT TERM
+[ "$(id -u)" -eq 0 ] || { printf '%s\n' 'Run as root.' >&2; exit 1; }
+
+# Only use @data on the same Btrfs partition as the running @root. Never scan
+# or select the historical eMMC data partition by label.
+[ "$(findmnt -n --mountpoint / -o FSTYPE)" = btrfs ]
+[ "$(findmnt -n --mountpoint / -o FSROOT)" = /@root ]
+source=$(findmnt -n --mountpoint / -o SOURCE)
+source=${source%%\[*}
+case "$source" in
+    /dev/sd[a-z][0-9]*|/dev/mmcblk[0-9]p[0-9]*|/dev/nvme[0-9]n[0-9]p[0-9]*) ;;
+    *) printf 'Unsupported root device: %s\n' "$source" >&2; exit 1 ;;
+esac
+[ -b "$source" ]
+if ! mountpoint -q /data; then
+    mount -t btrfs -o subvol=@data,compress=zstd:3,noatime,sync "$source" /data
+fi
+[ "$(findmnt -n --mountpoint /data -o FSTYPE)" = btrfs ]
+[ "$(findmnt -n --mountpoint /data -o FSROOT)" = /@data ]
+data_source=$(findmnt -n --mountpoint /data -o SOURCE)
+data_source=${data_source%%\[*}
+[ "$(readlink -f "$data_source")" = "$(readlink -f "$source")" ]
+# Synchronous diagnostic writes improve survival of the last trace records
+# across the abrupt reset under investigation.
+mount -o remount,sync /data
+mkdir -p /data/r2s-debug
+run=$(mktemp -d "/data/r2s-debug/${mode}.XXXXXX")
+printf 'R2S_DEBUG: mode=%s pid=%s logs=%s\n' "$mode" "$$" "$run" >&2
+
+if ! mountpoint -q /sys/kernel/tracing; then
+    mount -t tracefs tracefs /sys/kernel/tracing
+fi
+[ "$(findmnt -n --mountpoint /sys/kernel/tracing -o FSTYPE)" = tracefs ]
+# Separate instance: do not clear or configure the global tracing buffer.
+trace="/sys/kernel/tracing/instances/r2s-${mode}-$$"
+mkdir "$trace"
+printf '0\n' > "$trace/tracing_on"
+printf 'mono\n' > "$trace/trace_clock"
+printf '1024\n' > "$trace/buffer_size_kb"
+[ -e "$trace/events/raw_syscalls/sys_enter/enable" ]
+[ -e "$trace/events/raw_syscalls/sys_exit/enable" ]
+printf '1\n' > "$trace/events/raw_syscalls/sys_enter/enable"
+printf '1\n' > "$trace/events/raw_syscalls/sys_exit/enable"
+
+cat /proc/cmdline > "$run/cmdline.txt"
+cat /proc/uptime > "$run/uptime.txt"
+uname -a > "$run/kernel.txt"
+printf '%s\n' "$trace" > "$run/trace-instance.txt"
+# The reader is started before fork following/filtering so its own writes
+# cannot recursively trace the trace output.
+tee "$run/kernel-syscalls.log" < "$trace/trace_pipe" >&2 &
+reader=$!
+
+if [ "$mode" = systemd ]; then
+    printf '0\n' > "$trace/options/event-fork"
+    printf '%s\n' "$$" > "$trace/set_event_pid"
+    printf '1\n' > "$trace/tracing_on"
+    strace -f -ttt -T -s 128 -yy -p "$$" \
+        -o "|tee $run/strace.log >&2" &
+    tracer=$!
+    printf '%s\n' "$tracer" >> "$trace/set_event_pid"
+    attached=0
+    attempt=0
+    while [ "$attempt" -lt 50 ]; do
+        while read -r name value rest; do
+            if [ "$name" = TracerPid: ] && [ "$value" -ne 0 ]; then
+                attached=1
+            fi
+        done < /proc/1/status
+        [ "$attached" -eq 0 ] || break
+        kill -0 "$tracer" 2>/dev/null || break
+        sleep 0.1
+        attempt=$((attempt + 1))
+    done
+    [ "$attached" -eq 1 ] || { printf '%s\n' 'strace could not attach to PID 1.' >&2; exit 1; }
+    printf '%s\n' 'R2S_DEBUG: tracer attached; executing systemd as PID 1' >&2
+    # Successful exec preserves PID 1 and does not run the EXIT cleanup trap.
+    exec /sbin/init --log-level=debug --log-target=console
+fi
+
+# Stop the child shell before exec so filtering is installed before strace or
+# the problematic executable can run. $$ belongs to this new shell, not a
+# subshell of the diagnostic helper.
+case "$mode" in
+    python) code='exec python3 --version' ;;
+    python-init) code='exec python3 -c '\''print("R2S_PYTHON_MAIN", flush=True)'\''' ;;
+esac
+sh -c 'kill -STOP "$$"; exec strace -f -ttt -T -s 128 -yy -o "|tee $1/strace.log >&2" sh -c "$2"' \
+    r2s-debug-child "$run" "$code" &
+target=$!
+attempt=0
+stopped=0
+while [ "$attempt" -lt 50 ]; do
+    while read -r name state rest; do
+        if [ "$name" = State: ] && [ "$state" = T ]; then stopped=1; fi
+    done < "/proc/$target/status"
+    [ "$stopped" -eq 0 ] || break
+    kill -0 "$target" 2>/dev/null || break
+    sleep 0.1
+    attempt=$((attempt + 1))
+done
+[ "$stopped" -eq 1 ] || { printf '%s\n' 'Diagnostic child did not stop before tracing.' >&2; exit 1; }
+printf '1\n' > "$trace/options/event-fork"
+printf '%s\n' "$target" > "$trace/set_event_pid"
+printf '1\n' > "$trace/tracing_on"
+printf 'R2S_DEBUG: tracing child pid=%s\n' "$target" >&2
+kill -CONT "$target"
+result=0
+wait "$target" || result=$?
+target=''
+sleep 0.2
+printf 'R2S_DEBUG: target returned %s; logs=%s\n' "$result" "$run" >&2
+exit "$result"

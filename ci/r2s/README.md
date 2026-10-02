@@ -250,6 +250,43 @@ Para restaurar el arranque normal, retirar `init=/bin/sh panic=0` de `extraargs`
 en `/boot/orangepiEnv.txt`. Con init normal se aplican las instrucciones de acceso
 y servicios descritas a continuación.
 
+### Imagen instrumentada: strace y syscalls del kernel
+
+La imagen incluye `strace`, `CONFIG_FTRACE_SYSCALLS=y`, tracepoints, tracefs y
+`/usr/sbin/r2s-debug` del paquete `r2s-platform`. Desde la shell de diagnóstico:
+
+```sh
+r2s-debug info
+r2s-debug python
+r2s-debug python-init
+```
+
+Los dos escenarios Python siguen tanto la carga del programa como sus syscalls.
+El proceso se detiene antes de exec hasta instalar el filtro del kernel. La
+salida de `strace` y una instancia aislada de tracefs se envían a la consola
+serie y a `/data/r2s-debug/<escenario>.XXXXXX/`, junto con kernel, cmdline y uptime.
+El helper monta `@data` exclusivamente desde la misma partición Btrfs que la
+raíz `@root`; nunca selecciona la p6 histórica de la eMMC. Los mounts de datos
+para diagnóstico usan escrituras síncronas para conservar registros ante reset.
+
+Para seguir el salto real a systemd como PID 1:
+
+```sh
+exec r2s-debug systemd
+```
+
+Este modo rechaza ejecutarse como proceso hijo. Arranca el lector de tracefs y
+adjunta `strace` antes del exec, conservando PID 1. Si no puede preparar o adjuntar
+el tracer, vuelve a una shell PID 1. El lector queda fuera del filtro para evitar
+realimentar sus propias escrituras. La captura serie debe estar activa antes de
+ejecutar cualquier escenario: un reset abrupto puede perder los últimos mensajes
+que aún estén pendientes de transmisión o escritura.
+
+`verify` comprueba el contrato de tracing del kernel, la instalación de strace,
+la sintaxis/propietario/ejecución de `r2s-debug --help`, además del firmware y
+bootfs. Los escenarios se ejecutan manualmente en la placa; no se activa tracing
+automáticamente ni se arranca un programa que pueda reiniciar la placa al boot.
+
 ### Firmware RCPU y watchdogs heredados
 
 `r2s-platform` instala el `esos.elf` versionado del BSP KY y un hook estricto de

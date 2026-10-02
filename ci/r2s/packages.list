@@ -37,6 +37,7 @@ mmc-utils
 smartmontools
 cloud-guest-utils
 tcpdump
+strace
 ethtool
 iperf3
 iputils-ping
