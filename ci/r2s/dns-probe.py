@@ -63,13 +63,31 @@ def dhcp(interface):
     fixed = struct.pack("!BBBBIHH4s4s4s4s16s64s128s", 1, 1, 6, 0, transaction, 0, 0x8000,
                         b"\0" * 4, b"\0" * 4, b"\0" * 4, b"\0" * 4, mac + b"\0" * 10,
                         b"\0" * 64, b"\0" * 128) + bytes.fromhex("63825363")
-    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+    # A DHCP client has no IPv4 address yet. Receive at L2 like dhclient,
+    # otherwise Linux may discard the offer before an AF_INET socket sees it.
+    with socket.socket(socket.AF_PACKET, socket.SOCK_DGRAM, socket.htons(0x0800)) as incoming, \
+            socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+        incoming.bind((interface, 0))
+        incoming.settimeout(5)
+        def receive(kind):
+            deadline = time.monotonic() + 5
+            while time.monotonic() < deadline:
+                packet = incoming.recv(4096)
+                ihl = (packet[0] & 15) * 4
+                if len(packet) < ihl + 8 + 240 or packet[9] != 17:
+                    continue
+                if struct.unpack_from("!H", packet, ihl + 2)[0] != 68:
+                    continue
+                message = packet[ihl + 8:]
+                if struct.unpack_from("!I", message, 4)[0] == transaction and options(message).get(53) == kind:
+                    return message
+            raise ValueError("Matching DHCP response was not received")
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_BINDTODEVICE, interface.encode() + b"\0")
         sock.bind(("0.0.0.0", 68))
         sock.settimeout(5)
         sock.sendto(fixed + b"\x35\x01\x01\x37\x03\x01\x03\x06\xff", ("255.255.255.255", 67))
-        offer, _ = sock.recvfrom(4096)
+        offer = receive(b"\x02")
         opts = options(offer)
         if struct.unpack_from("!I", offer, 4)[0] != transaction or opts.get(53) != b"\x02":
             raise ValueError("Expected matching DHCP offer")
@@ -79,7 +97,7 @@ def dhcp(interface):
             raise ValueError("Lease outside the declared pool")
         sock.sendto(fixed + b"\x35\x01\x03\x32\x04" + address + b"\x36\x04" + server + b"\xff",
                     ("255.255.255.255", 67))
-        ack, _ = sock.recvfrom(4096)
+        ack = receive(b"\x05")
         opts = options(ack)
         if opts.get(53) != b"\x05" or opts.get(3) != socket.inet_aton("10.0.0.1") or opts.get(6) != socket.inet_aton("10.0.0.1"):
             raise ValueError("DHCP ACK has incorrect router/DNS options")

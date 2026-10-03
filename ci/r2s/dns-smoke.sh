@@ -101,4 +101,4 @@ else
     printf '%s\n' 'Image DHCP/DNS tested under QEMU; NETLINK_NETFILTER is tested with the matching native reference'
 fi
 [[ -s $directory/leases/dnsmasq.leases ]]
-printf '%s\n' 'Image DHCP ACK, protected pidfile, leases, LAN DNS and nftset tests passed'
+printf '%s\n' 'DHCP ACK, protected pidfile, leases and LAN DNS tests passed for this architecture'
