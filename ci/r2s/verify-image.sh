@@ -163,6 +163,8 @@ chroot "$target" systemd-analyze verify \
      > _ci/logs/systemd-validation.txt 2>&1
 mkdir -p "$target/run/r2s" "$target/run/r2s-doh"
 unshare --mount --net bash ci/r2s/dns-smoke.sh "$target" --lan > _ci/logs/dns-runtime-validation.txt 2>&1
+bash ci/r2s/native-dns-root.sh > _ci/logs/native-dns-bootstrap.txt 2>&1
+unshare --mount --net bash ci/r2s/dns-smoke.sh "$root/_ci/dns-native" --lan > _ci/logs/nftset-runtime-validation.txt 2>&1
 unshare --mount bash ci/r2s/dns-smoke.sh "$target" --doh > _ci/logs/doh-runtime-validation.txt 2>&1
 for file in /boot/Image /boot/dtb/ky/x1_orangepi-r2s.dtb; do
     installed=$(chroot "$target" sha256sum "$file" | cut -d' ' -f1)

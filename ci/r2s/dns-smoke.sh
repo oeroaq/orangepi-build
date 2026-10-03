@@ -3,11 +3,13 @@
 set -euo pipefail
 root=$(realpath "$(dirname "$0")/../..")
 target=$(realpath "$1")
-[[ ${CI:-false} == true && $root == /openwrt && $target == "$root/_ci/verify-root" && $EUID == 0 ]] || exit 1
+image="$root/_ci/verify-root"
+[[ ${CI:-false} == true && $root == /openwrt && $EUID == 0 ]] || exit 1
+[[ $target == "$image" || $target == "$root/_ci/dns-native" ]] || exit 1
 source "$root/ci/r2s/chroot-env.sh"
-directory="$root/_ci/dns-smoke"
 mode=${2:---lan}
 [[ $mode == --lan || $mode == --doh ]]
+directory="$root/_ci/dns-smoke-${target##*/}"
 mkdir -p "$directory/run" "$directory/leases" "$directory/doh"
 client='' daemon='' upstream=''
 cleanup()
@@ -34,6 +36,11 @@ if [[ $mode == --doh ]]; then
     exit 0
 fi
 ip link set lo up
+if [[ $target != "$image" ]]; then
+    mount --bind /dev "$target/dev"
+    mount --bind "$target" "$target"
+    mount -o remount,bind,ro "$target"
+fi
 ip link add br-lan type bridge
 ip address add 10.0.0.1/24 dev br-lan
 ip link set br-lan up
@@ -52,14 +59,14 @@ mount --bind "$target/run" "$target/run"
 mount -o remount,bind,ro "$target/run"
 mount --bind "$directory/run" "$target/run/r2s"
 mount --bind "$directory/leases" "$target/var/lib/misc"
-python3 -B - "$root" "$target" "$directory" <<'PY'
+python3 -B - "$root" "$image" "$directory" "$target" <<'PY'
 import json, sys
 from pathlib import Path
-root, image, directory = map(Path, sys.argv[1:])
+root, image, directory, target = map(Path, sys.argv[1:])
 sys.path.insert(0, str(root / 'package/r2s-platform/root/usr/lib/r2s'))
 import model
 config = json.loads((image / 'etc/r2s/router.json').read_text())
-groups = model.policies({'groups':[{'id':1,'interface':'wg0','domains':['example.com']}]})
+groups = [] if target == image else model.policies({'groups':[{'id':1,'interface':'wg0','domains':['example.com']}]})
 (directory / 'run/dnsmasq.conf').write_text(model.dns_config(config, groups) + 'host-record=smoke.home.arpa,10.0.0.1\n')
 (directory / 'run/dns-blocklists/smoke.conf').write_text('address=/blocked.example/#\n')
 PY
@@ -84,10 +91,14 @@ lease=$(nsenter -t "$client" -n python3 -B "$root/ci/r2s/dns-probe.py" dhcp)
 [[ $lease =~ ^10\.0\.0\.(1[0-9][0-9])$ ]]
 nsenter -t "$client" -n ip address add "$lease/24" dev r2s-client
 nsenter -t "$client" -n python3 -B "$root/ci/r2s/dns-probe.py" dns
+if [[ $target != "$image" ]]; then
 nft -j list set inet r2s_router pbr1_4 | python3 -B -c '
 import json,sys
 data=json.load(sys.stdin)
 assert any("192.0.2.123" in item.get("set",{}).get("elem",[]) for item in data["nftables"])
-print("Image dnsmasq populated its PBR nftset")'
+print("Matching native dnsmasq populated its PBR nftset")'
+else
+    printf '%s\n' 'Image DHCP/DNS tested under QEMU; NETLINK_NETFILTER is tested with the matching native reference'
+fi
 [[ -s $directory/leases/dnsmasq.leases ]]
 printf '%s\n' 'Image DHCP ACK, protected pidfile, leases, LAN DNS and nftset tests passed'

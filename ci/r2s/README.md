@@ -247,6 +247,10 @@ dnsmasq conserva el grupo nativo de su usuario y escribe su pidfile en `/run/r2s
 una ruta permitida por el confinamiento. Los tests de imagen arrancan sus binarios
 reales en namespaces aislados y prueban DHCP, DNS interno, upstream, blocklist y
 nftsets; también prueban DoH con el usuario sin privilegios y las fuentes NTP IP.
+QEMU user no traduce `NETLINK_NETFILTER`: DHCP/DNS se prueban con el binario
+RISC-V real y la inserción nftset con un chroot amd64 del mismo snapshot, exigiendo
+la misma versión exacta de dnsmasq. La inserción desde el binario RISC-V requiere
+además la prueba física en el R2S.
 
 ### Shell temporal como PID 1 para diagnóstico
 
