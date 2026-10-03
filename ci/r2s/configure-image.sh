@@ -20,11 +20,13 @@ chroot "$image" sh -eu -c '
     for unit in dnsmasq.service dnscrypt-proxy.service dnscrypt-proxy.socket \
         systemd-resolved.service systemd-networkd.service ssh.socket vnstat.service \
         collectd.service strongswan-starter.service strongswan.service \
-        orangepi-firstrun.service orangepi-firstrun-config.service orangepi-resize-filesystem.service; do
+        orangepi-firstrun.service orangepi-firstrun-config.service orangepi-resize-filesystem.service \
+        orangepi-zram-config.service orangepi-ramlog.service; do
         systemctl disable "$unit" 2>/dev/null || true
         systemctl mask "$unit"
     done
     systemctl enable NetworkManager.service ssh.service chrony.service docker.service
+    systemctl set-default multi-user.target
     # Generated configuration and identities must not leak into the firmware.
     rm -f /etc/ssh/ssh_host_*
     : > /etc/machine-id

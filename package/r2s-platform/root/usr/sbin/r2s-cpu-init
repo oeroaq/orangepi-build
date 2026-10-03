@@ -1,0 +1,22 @@
+#!/bin/sh
+# Runs in initramfs before the main init, using only shell builtins and sleep.
+set -eu
+case "${1:-}" in
+    --help|-h) printf '%s\n' 'Initialize R2S DVFS through 614400 -> 1600000 kHz before main init.'; exit 0 ;;
+    '') ;;
+    *) exit 2 ;;
+esac
+# shellcheck disable=SC1091
+. /usr/lib/r2s/cpu-dvfs.sh
+attempt=0
+while [ ! -d /sys/devices/system/cpu/cpufreq/policy0 ]; do
+    [ "$attempt" -lt 15 ] || { printf '%s\n' 'R2S_DVFS: cpufreq policy unavailable' >&2; exit 1; }
+    sleep 1
+    attempt=$((attempt + 1))
+done
+result=0
+for policy in /sys/devices/system/cpu/cpufreq/policy*; do
+    r2s_cpu_policy "$policy" || result=1
+done
+[ "$result" -ne 0 ] || sleep 1
+exit "$result"

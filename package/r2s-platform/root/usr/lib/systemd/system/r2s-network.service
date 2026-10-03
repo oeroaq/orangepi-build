@@ -1,7 +1,6 @@
 [Unit]
 Description=Configure R2S WAN/LAN and router firewall
-After=local-fs.target systemd-udev-settle.service systemd-sysctl.service r2s-grow.service
-Wants=systemd-udev-settle.service
+After=local-fs.target systemd-udev-trigger.service systemd-sysctl.service r2s-grow.service
 Before=NetworkManager.service network-pre.target
 
 [Service]

@@ -205,7 +205,7 @@ La imagen genera estas opciones en `/boot/orangepiEnv.txt`:
 verbosity=7
 console=serial
 earlycon=on
-extraargs=rootflags=subvol=@root mem=2G ignore_loglevel init=/bin/sh panic=0
+extraargs=rootflags=subvol=@root mem=2G ignore_loglevel panic=0
 ```
 
 El DTB vendor fijado declara dos bancos de 2 GiB, mientras que la placa probada
@@ -222,9 +222,35 @@ Para retirar posteriormente la salida detallada, cambiar `verbosity=1` y quitar
 `ignore_loglevel` de `extraargs`, conservando el subvolumen y el límite
 de memoria hasta validar el DTB efectivo en hardware.
 
-### Imagen temporal con shell como PID 1
+### Inicialización DVFS y arranque normal
 
-El perfil actual usa `init=/bin/sh`: el initramfs sigue cargando los drivers y
+La candidata arranca con systemd y target `multi-user.target`. El kernel usa
+`CONFIG_CPU_FREQ_DEFAULT_GOV_POWERSAVE=y`; antes del init principal, el paquete
+`r2s-platform` incluye en initramfs una inicialización POSIX de cpufreq:
+
+```text
+R2S_DVFS: ... low OPP=614400 kHz
+R2S_DVFS: ... nominal OPP=1600000 kHz verified
+```
+
+La secuencia reproduce la transición validada manualmente en el R2S: 614.4 MHz
+con 950 mV declarados por el OPP y regreso a 1.6 GHz con 1050 mV. No programa
+voltajes manualmente ni deja un límite permanente a 614.4 MHz. Si falla la subida,
+intenta mantener el governor bajo y deja un mensaje explícito en consola.
+`verify` comprueba los bytes de la implementación dentro de rootfs y `uInitrd`,
+además de las opciones del kernel. La integración automática requiere validar
+arranques fríos en la placa; no equivale a una certificación de estabilidad larga.
+
+La red espera sus cuatro puertos físicos, sin bloquearse por `udev-settle` global.
+Se deshabilitan ZRAM/ramlog históricos que interfieren con los subvolúmenes Btrfs.
+dnsmasq conserva el grupo nativo de su usuario y escribe su pidfile en `/run/r2s`,
+una ruta permitida por el confinamiento. Los tests de imagen arrancan sus binarios
+reales en namespaces aislados y prueban DHCP, DNS interno, upstream, blocklist y
+nftsets; también prueban DoH con el usuario sin privilegios y las fuentes NTP IP.
+
+### Shell temporal como PID 1 para diagnóstico
+
+Para diagnóstico, añadir `init=/bin/sh` a `extraargs`: el initramfs sigue cargando los drivers y
 montando el rootfs Btrfs, pero entrega PID 1 a una shell root por la consola serie
 en lugar de iniciar systemd. Los servicios de router, DHCP, DNS, SSH y Docker no
 se arrancan automáticamente en este modo. `panic=0` evita el reinicio automático

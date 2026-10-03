@@ -75,6 +75,11 @@ chroot "$target" /bin/sh -eu -c '
     test "$(dpkg --print-architecture)" = riscv64
     test -x /bin/sh
     test -x /usr/sbin/r2s-debug
+    test -x /usr/sbin/r2s-cpu-init
+    test -x /etc/initramfs-tools/scripts/init-premount/r2s-cpu
+    sh -n /usr/sbin/r2s-cpu-init
+    sh -n /usr/lib/r2s/cpu-dvfs.sh
+    /usr/sbin/r2s-cpu-init --help
     sh -n /usr/sbin/r2s-debug
     /usr/sbin/r2s-debug --help
     strace -V
@@ -93,6 +98,13 @@ chroot "$target" /bin/sh -eu -c '
     dpkg-query -S /usr/lib/firmware/esos.elf | grep -q "^r2s-platform:"
     dpkg-query -S /etc/initramfs-tools/hooks/r2s-firmware | grep -q "^r2s-platform:"
     dpkg-query -S /usr/sbin/r2s-debug | grep -q "^r2s-platform:"
+    dpkg-query -S /usr/sbin/r2s-cpu-init | grep -q "^r2s-platform:"
+    test "$(systemctl get-default)" = multi-user.target
+    for unit in orangepi-zram-config.service orangepi-ramlog.service; do
+        test "$(systemctl is-enabled "$unit" 2>/dev/null || true)" = masked
+    done
+    getent passwd dnsmasq
+    chronyd -p | grep -q "server 162.159.200.1"
     python3 -B /usr/lib/r2s/runtime.py check
     visudo -cf /etc/sudoers
     dnsmasq --version | grep -w nftset
@@ -148,7 +160,10 @@ chroot "$target" systemd-analyze verify \
     r2s-grow.service r2s-network.service r2s-refresh.service r2s-links.service \
     r2s-dns.service r2s-doh.service r2s-firstboot.service r2s-restore.service \
     r2s-metrics.service r2s-vnstat.service r2s-blocklist.service \
-    > _ci/logs/systemd-validation.txt 2>&1
+     > _ci/logs/systemd-validation.txt 2>&1
+mkdir -p "$target/run/r2s" "$target/run/r2s-doh"
+unshare --mount --net bash ci/r2s/dns-smoke.sh "$target" --lan > _ci/logs/dns-runtime-validation.txt 2>&1
+unshare --mount bash ci/r2s/dns-smoke.sh "$target" --doh > _ci/logs/doh-runtime-validation.txt 2>&1
 for file in /boot/Image /boot/dtb/ky/x1_orangepi-r2s.dtb; do
     installed=$(chroot "$target" sha256sum "$file" | cut -d' ' -f1)
     case "$file" in

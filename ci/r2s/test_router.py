@@ -14,6 +14,7 @@ PLATFORM = ROOT / "package/r2s-platform/root"
 sys.path.insert(0, str(PLATFORM / "usr/lib/r2s"))
 import model
 import kernel
+import runtime
 
 
 def module(name, path):
@@ -44,6 +45,8 @@ class RouterTests(unittest.TestCase):
         self.assertIn("10.0.0.100,10.0.0.199,255.255.255.0,12h", dns)
         self.assertIn("no-resolv", dns)
         self.assertIn("server=127.0.0.1#5053", dns)
+        self.assertIn("pid-file=/run/r2s/dnsmasq.pid", dns)
+        self.assertNotIn("group=dnsmasq", dns)
 
     def test_invalid_network_input_cannot_inject_generated_configuration(self):
         cases = [("lan_bridge", 'br-lan"; flush ruleset'), ("domain", "home.arpa\nserver=8.8.8.8"),
@@ -176,6 +179,38 @@ class FilesystemTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             kernel.verify(file)
 
+    def test_kernel_contract_understands_disabled_choices_and_rejects_missing_choice(self):
+        file = self.root / "config"
+        file.write_text("\n".join(f"# {symbol} is not set" if modes == "n" else f"{symbol}={modes[0]}"
+                                  for symbol, modes in kernel.requirements()))
+        kernel.verify(file)
+        file.write_text(file.read_text().replace("# CONFIG_CPU_FREQ_DEFAULT_GOV_PERFORMANCE is not set", ""))
+        with self.assertRaises(ValueError):
+            kernel.verify(file)
+
+    def test_network_waits_for_all_four_ports_before_committing_mapping(self):
+        net = self.root / "net"
+        hardware = self.root / "hardware"
+        net.mkdir()
+        hardware.mkdir()
+        config = json.loads((PLATFORM / "etc/r2s/router.json").read_text())
+        for name, address in (("end0", "ethernet@cac80000"), ("end1", "ethernet@cac81000"),
+                              ("enP1p1s0", "pci-1"), ("enP2p1s0", "pci-2")):
+            node = net / name
+            node.mkdir()
+            (node / "type").write_text("1\n")
+            device = hardware / name
+            device.mkdir()
+            (node / "device").symlink_to(device)
+            of_node = hardware / address
+            of_node.mkdir()
+            (device / "of_node").symlink_to(of_node)
+            if name != "enP2p1s0":
+                with self.assertRaises(ValueError):
+                    runtime.ports(config, net)
+        wan, lans = runtime.ports(config, net)
+        self.assertEqual(wan, "end0")
+        self.assertEqual(set(lans), {"end1", "enP1p1s0", "enP2p1s0"})
     def test_installer_checks_exact_byte_ranges_and_never_copies_past_input(self):
         source, target = self.root / "source", self.root / "target"
         source.write_bytes(b"1234kernel5678")

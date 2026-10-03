@@ -34,7 +34,8 @@ def main():
     for path in stage.rglob("*"):
         if path.is_file():
             if (path.parent.name in ("sbin", "dispatcher.d") or path.name in ("postinst", "watch-links")
-                    or path.parent == stage / "etc/initramfs-tools/hooks"):
+                    or path.parent == stage / "etc/initramfs-tools/hooks"
+                    or path.parent == stage / "etc/initramfs-tools/scripts/init-premount"):
                 os.chmod(path, 0o755)
             elif path.parent.name == "sudoers.d":
                 os.chmod(path, 0o440)

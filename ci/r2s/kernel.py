@@ -16,10 +16,11 @@ def requirements():
 
 
 def verify(path):
-    config = dict(line.split("=", 1) for line in Path(path).read_text().splitlines()
-                  if line.startswith("CONFIG_") and "=" in line)
+    lines = Path(path).read_text().splitlines()
+    config = dict(line.split("=", 1) for line in lines if line.startswith("CONFIG_") and "=" in line)
+    config.update({line[2:-11]: "n" for line in lines if line.startswith("# CONFIG_") and line.endswith(" is not set")})
     missing = [f"{symbol}: expected {modes}, got {config.get(symbol, 'unset')}"
-               for symbol, modes in requirements() if config.get(symbol, "n") not in modes]
+               for symbol, modes in requirements() if config.get(symbol, "missing") not in modes]
     if missing:
         raise ValueError("Kernel contract failed:\n" + "\n".join(missing))
 
@@ -33,7 +34,7 @@ def main():
     if args.command == "apply":
         for symbol, modes in requirements():
             # Prefer built-in for either-mode boot/storage prerequisites.
-            switch = "--module" if modes == "m" else "--enable"
+            switch = "--disable" if modes == "n" else "--module" if modes == "m" else "--enable"
             subprocess.run([str(path.parent / "scripts/config"), "--file", str(path),
                             switch, symbol.removeprefix("CONFIG_")], check=True)
     else:

@@ -48,10 +48,10 @@ def load():
     return config, groups
 
 
-def ports(config):
+def ports(config, net=Path("/sys/class/net")):
     devices = []
     wan = config.get("wan_override")
-    for path in Path("/sys/class/net").iterdir():
+    for path in net.iterdir():
         if not (path / "device").exists() or (path / "type").read_text().strip() != "1":
             continue
         # Real hardware ports only: never enslave Docker/veth/VPN devices.
@@ -63,6 +63,8 @@ def ports(config):
                     continue
                 raise ValueError("Ambiguous WAN device-tree identity")
             wan = path.name
+    if len(devices) < 4:
+        raise ValueError("Waiting for all four R2S Ethernet ports")
     if wan not in devices:
         raise ValueError("Cannot identify WAN ethernet@cac80000; inspect r2sctl status and set wan_override explicitly")
     lans = sorted(set(devices) - {wan} - set(config.get("additional_wan", [])))
@@ -411,5 +413,8 @@ def main():
 if __name__ == "__main__":
     try:
         main()
-    except (ValueError, OSError, subprocess.CalledProcessError) as error:
+    except subprocess.CalledProcessError as error:
+        detail = (error.stderr or error.stdout or "").strip()
+        raise SystemExit(f"R2S: {error}\n{detail}")
+    except (ValueError, OSError) as error:
         raise SystemExit(f"R2S: {error}")

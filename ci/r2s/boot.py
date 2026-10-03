@@ -37,10 +37,10 @@ def legacy_payload(data):
     return payload
 
 
-def initramfs_firmware(data):
+def initramfs_files(data):
     archive = gzip.decompress(legacy_payload(data))
     position = 0
-    firmware = []
+    files = {}
     while position < len(archive):
         while position < len(archive) and archive[position] == 0:
             position += 1
@@ -62,11 +62,18 @@ def initramfs_firmware(data):
             raise ValueError("Truncated initramfs cpio file")
         if name.startswith("./"):
             name = name[2:]
-        if name in ("lib/firmware/esos.elf", "usr/lib/firmware/esos.elf"):
-            if mode & 0o170000 != 0o100000:
-                raise ValueError("RCPU firmware in initramfs must be a regular file")
-            firmware.append(archive[position:end])
+        if mode & 0o170000 == 0o100000 and name != "TRAILER!!!":
+            value = archive[position:end]
+            if name in files and files[name] != value:
+                raise ValueError("Conflicting copies of initramfs file: " + name)
+            files[name] = value
         position = (end + 3) & ~3
+    return files
+
+
+def initramfs_firmware(data):
+    files = initramfs_files(data)
+    firmware = [files[name] for name in ("lib/firmware/esos.elf", "usr/lib/firmware/esos.elf") if name in files]
     # Legacy family hooks may populate /lib as well as /usr/lib before the
     # initramfs usrmerge step. Every available copy must be identical.
     if not firmware or any(value != firmware[0] for value in firmware):
@@ -88,9 +95,20 @@ def verify(root):
         raise ValueError("Versioned RCPU firmware is not an ELF image")
     if (root / "usr/lib/firmware/esos.elf").read_bytes() != expected_firmware:
         raise ValueError("Installed RCPU firmware differs from the versioned BSP")
-    if initramfs_firmware((root / "boot/uInitrd").read_bytes()) != expected_firmware:
+    initrd = (root / "boot/uInitrd").read_bytes()
+    if initramfs_firmware(initrd) != expected_firmware:
         raise ValueError("Early RCPU firmware differs from the installed/versioned firmware")
-    print("Boot validation passed: watchdog handoff, boot.scr and matching RCPU firmware in rootfs/initramfs")
+    files = initramfs_files(initrd)
+    cpu_files = {
+        "usr/sbin/r2s-cpu-init": "usr/sbin/r2s-cpu-init",
+        "usr/lib/r2s/cpu-dvfs.sh": "usr/lib/r2s/cpu-dvfs.sh",
+        "scripts/init-premount/r2s-cpu": "etc/initramfs-tools/scripts/init-premount/r2s-cpu",
+    }
+    for name, source in cpu_files.items():
+        expected_cpu = (ROOT / "package/r2s-platform/root" / source).read_bytes()
+        if files.get(name) != expected_cpu or (root / source).read_bytes() != expected_cpu:
+            raise ValueError("Early DVFS implementation does not match its source package: " + name)
+    print("Boot validation passed: watchdog handoff, boot.scr, matching RCPU firmware and early DVFS in rootfs/initramfs")
 
 
 def main():

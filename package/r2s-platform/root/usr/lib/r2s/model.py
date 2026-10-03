@@ -147,7 +147,8 @@ def dns_config(config, groups):
     config = router(config)
     network = ipaddress.ip_interface(config["lan_address"])
     lines = ["# Generated from /etc/r2s/router.json; no resolver from WAN DHCP.",
-             "user=dnsmasq", "group=dnsmasq", "dhcp-leasefile=/var/lib/misc/dnsmasq.leases",
+             "user=dnsmasq", "pid-file=/run/r2s/dnsmasq.pid", "log-facility=-",
+             "dhcp-leasefile=/var/lib/misc/dnsmasq.leases",
              "port=53", "bind-dynamic", "interface=lo", "interface=" + config["lan_bridge"],
              "except-interface=wan0", "no-resolv", "server=127.0.0.1#5053",
              "domain-needed", "bogus-priv", "stop-dns-rebind", "cache-size=4096",

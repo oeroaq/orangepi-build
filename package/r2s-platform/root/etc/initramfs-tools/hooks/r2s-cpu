@@ -1,0 +1,9 @@
+#!/bin/sh
+set -eu
+case "${1:-}" in prereqs) exit 0 ;; esac
+# shellcheck disable=SC1091
+. /usr/share/initramfs-tools/hook-functions
+for file in /usr/sbin/r2s-cpu-init /usr/lib/r2s/cpu-dvfs.sh; do
+    test -s "$file"
+    copy_file config "$file" || cmp -s "$file" "${DESTDIR}${file}"
+done

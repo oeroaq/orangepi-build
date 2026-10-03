@@ -1,0 +1,6 @@
+#!/bin/sh
+set -eu
+case "${1:-}" in prereqs) exit 0 ;; esac
+if ! /usr/sbin/r2s-cpu-init; then
+    printf '%s\n' 'R2S_DVFS: early initialization failed; inspect console; low governor retained where possible' >&2
+fi
